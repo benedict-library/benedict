@@ -111,12 +111,11 @@ fn english_and_korean_readme_quickstarts_file_searchable_answers() {
         let temp = tempfile::tempdir().unwrap();
         let doc = fs::read_to_string(repo_root().join(name)).unwrap();
         let source = doc
-            .split_once("```bash")
-            .unwrap()
-            .1
-            .split_once("```")
-            .unwrap()
-            .0;
+            .split("```bash")
+            .skip(1)
+            .map(|block| block.split_once("```").unwrap().0)
+            .find(|block| block.contains("bin/library.py init"))
+            .unwrap();
         let root = shell_quote(
             &temp
                 .path()
