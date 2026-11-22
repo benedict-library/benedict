@@ -1,13 +1,13 @@
 # Agent use: search, originals, filing and mailbox
 
-Start with the [library method](method.md). In an activated installation, run `doseogwan method` (Korean: `--lang ko`) to read it before selecting a registry.
+Start with the [library method](method.md). In an activated installation, run `benedict method` (Korean: `--lang ko`) to read it before selecting a registry.
 
 Use a dedicated library/container and synthetic examples first. The paths below refer only to a checkout and a new
 local data directory. Never substitute a production root while testing.
 
 ## Working from Docker
 
-Start with the [setup interview](docker-setup.md). In the activated project use `doseogwan search` to find documents, `doseogwan read shelf:river-field-note.md` to open the sample original, and `doseogwan file --id RECORD` to file an answered observation with its evidence. A librarian agent compares sources and records the synthesis with `doseogwan record --room librarian --question TITLE --answer SYNTHESIS --source REFERENCES`. Publish its encyclopedia page with `doseogwan file --id RECORD --as concept`. Use the same library for both commands. The maintenance command refreshes the index and reports retrieval checks. [External work and the courier](courier.md) · [The public square](plaza.md)
+Start with the [setup interview](docker-setup.md). In the activated project use `benedict search` to find documents, `benedict read shelf:river-field-note.md` to open the sample original, and `benedict file --id RECORD` to file an answered observation with its evidence. A librarian agent compares sources and records the synthesis with `benedict record --room librarian --question TITLE --answer SYNTHESIS --source REFERENCES`. Publish its encyclopedia page with `benedict file --id RECORD --as concept`. Use the same library for both commands. The maintenance command refreshes the index and reports retrieval checks. [External work and the courier](courier.md) · [The public square](plaza.md)
 
 ## File/index compatibility path
 

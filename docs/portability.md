@@ -2,7 +2,7 @@
 
 ## Docker runtime
 
-Docker starts the Rust `doseogwan` command. Activation creates the registry, wiki and database. `record` writes an entry for the named room, `room memory` reads its working records, and `recall` retrieves a durable entry by ID. Agents supply the question when they record a task. A search command alone does not archive a conversation. `file` turns a selected record into a Markdown page. See the [installation settings](docker-setup.md) and [handoff checks](verification.md).
+Docker starts the Rust `benedict` command. Activation creates the registry, wiki and database. `record` writes an entry for the named room, `room memory` reads its working records, and `recall` retrieves a durable entry by ID. Agents supply the question when they record a task. A search command alone does not archive a conversation. `file` turns a selected record into a Markdown page. See the [installation settings](docker-setup.md) and [handoff checks](verification.md).
 
 A library can opt into a shelf with its own `shelf_root`. Search indexes its Markdown and text originals. Use `read shelf:relative/path` to open the original and obtain its SHA-256 digest. Reindex after changing an original. Keep separate registries and volumes for libraries whose contents or names must remain private.
 

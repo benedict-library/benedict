@@ -1,6 +1,6 @@
 [package]
 name = "courier"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 description = "Run a command for an agent with a stated reason: full output kept in a file, a short head and tail shown, every run in a ledger"

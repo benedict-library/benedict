@@ -12,9 +12,28 @@ import math
 import os
 from pathlib import Path
 import re
+import shutil
 import stat
 import subprocess
 import sys
+
+# Registry fields the Rust CLI handles; a registry with any other field keeps the policy-aware Python path.
+SIMPLE_FIELDS = {"wiki_root", "shelf_root", "central", "name", "status", "reads", "dirs"}
+# Rust search records the query when these are set; this compatibility search never recorded.
+RECORDING_ENV = ("LIBRARY_DB", "LIBRARY_DB_URL", "LIBRARY_DB_URL_FILE", "LIBRARY_PROJECT", "LIBRARY_ROOM_SOCKET")
+
+
+def rust_cli():
+    """The built Rust CLI, which owns lexical search: BENEDICT_BIN, then PATH, then this checkout's build."""
+    if os.environ.get("BENEDICT_BIN"):
+        return os.environ["BENEDICT_BIN"]
+    if shutil.which("benedict"):
+        return shutil.which("benedict")
+    for build in ("release", "debug"):
+        path = Path(__file__).resolve().parent / "core" / "target" / build / "benedict"
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path)
+    return None
 
 _spec = importlib.util.spec_from_file_location("_library_filing", Path(__file__).parent / "bin/save_query.py")
 _filing = importlib.util.module_from_spec(_spec)
@@ -237,7 +256,7 @@ def init(config, demo=False, key="main", name="Example library"):
     if demo:
         (root / "entities").mkdir()
         (root / "entities/refund.md").write_text(
-            "# Synthetic refund policy\nUnused fictional products may be returned within 14 days.\n", encoding="utf-8")
+            "# Synthetic refund policy\nUnused fictional products may be returned within 14 days.\n사용하지 않은 가상 제품은 14일 안에 반품할 수 있습니다.\n", encoding="utf-8")
         (root / "entities/shipping.md").write_text(
             "# Synthetic shipping policy\nFictional parcels leave every Monday.\n", encoding="utf-8")
     registry = {"version": 1, "libraries": {key: {"name": name.strip(), "wiki_root": "wiki", "central": True}}}
@@ -464,6 +483,9 @@ class Library:
         if not words:
             raise ValueError("query must contain a word")
         key, _, root = self.selected(key)
+        rust = rust_cli()
+        if rust and all(set(row) <= SIMPLE_FIELDS for row in self.registry["libraries"].values()):
+            return self.rust_search(rust, query, key, top)
         path = self.index_path(key)
         if not path.is_file():
             raise ValueError("prebuilt index missing; run index or librarian before search")
@@ -492,6 +514,19 @@ class Library:
             title = next((line.lstrip("# ") for line in text.splitlines() if line.startswith("# ")), path)
             hits.append({"path": path, "title": title, "score": round(score, 6), "excerpt": text[:500]})
         return {"library": key, "engine": "lexical-bm25", "indexed_at": record["indexed_at"], "hits": hits}
+
+    def rust_search(self, rust, query, key, top):
+        """One library's hits from the Rust search, so both clients rank and explain results the same way."""
+        env = {k: v for k, v in os.environ.items() if k not in RECORDING_ENV}
+        done = subprocess.run([rust, "search", "--config", str(self.config), "--library", key, "--top", str(top), query],
+                              capture_output=True, text=True, encoding="utf-8", timeout=60, env=env)
+        if done.returncode:
+            try:
+                message = json.loads(done.stderr)["error"]
+            except (ValueError, KeyError, TypeError):
+                message = (done.stderr or done.stdout).strip()[:300]
+            raise ValueError(message)
+        return json.loads(done.stdout)
 
     def read(self, path, key=None):
         key, _, root = self.selected(key)

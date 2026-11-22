@@ -96,5 +96,5 @@ Run the Unix CLI tests with `cargo test --locked --manifest-path courier/Cargo.t
 ```sh
 cargo build --locked --manifest-path core/Cargo.toml
 cargo build --locked --manifest-path courier/Cargo.toml
-bash courier/tests/handoff.sh "$PWD/core/target/debug/doseogwan" "$PWD/courier/target/debug/courier"
+bash courier/tests/handoff.sh "$PWD/core/target/debug/benedict" "$PWD/courier/target/debug/courier"
 ```

@@ -22,7 +22,7 @@ use std::{
     process::{Command, ExitCode},
 };
 
-const HELP: &str = "Doseogwan — a library for agents and personas
+const HELP: &str = "Benedict — a library for agents and personas
 
   setup        configure Docker storage, database and memory limits
   init | add   create a central or project library
@@ -40,6 +40,7 @@ const HELP: &str = "Doseogwan — a library for agents and personas
   room         share tasks, replies and live room observations
   method       read the library operating guide
   import | web-source   import a skill, wiki page or public source
+  version      print the installed Benedict version (see CHANGELOG.md)
 
 See docs/docker-setup.md for installation.";
 
@@ -106,7 +107,7 @@ fn option(args: &mut Vec<String>, name: &str) -> Result<Option<String>, String> 
 }
 
 fn app() -> PathBuf {
-    env::var_os("DOSEOGWAN_APP")
+    env::var_os("BENEDICT_APP")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/app"))
 }
@@ -114,7 +115,7 @@ fn app() -> PathBuf {
 fn legacy(cmd: &str, args: &[String]) -> Result<i32, String> {
     let dir = app();
     let mut adapter = Command::new("python3");
-    adapter.env_remove("DOSEOGWAN_CLI");
+    adapter.env_remove("BENEDICT_CLI");
     if matches!(cmd, "evaluate" | "librarian") {
         adapter.arg(dir.join(format!("bin/{cmd}.py")));
     } else {
@@ -137,12 +138,16 @@ fn run() -> Result<i32, String> {
         .any(|s| s == "--help" || s == "-h")
         && let Some(description) = usage(&cmd)
     {
-        println!("doseogwan {description}");
+        println!("benedict {description}");
         return Ok(0);
     }
     match cmd.as_str() {
         "--help" | "-h" => {
             println!("{HELP}");
+            return Ok(0);
+        }
+        "version" | "--version" | "-V" => {
+            println!("{}", json!({"version": env!("CARGO_PKG_VERSION")}));
             return Ok(0);
         }
         "backup" => {
@@ -172,7 +177,7 @@ fn run() -> Result<i32, String> {
         _ => {}
     }
     if usage(&cmd).is_none() {
-        return Err(format!("unknown command: {cmd}; run doseogwan --help"));
+        return Err(format!("unknown command: {cmd}; run benedict --help"));
     }
     let default_config = env::var("LIBRARY_CONFIG").unwrap_or_else(|_| "library.json".into());
     let configured = args

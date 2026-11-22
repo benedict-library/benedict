@@ -7,7 +7,7 @@ use std::{
 use tempfile::tempdir;
 
 fn cli(home: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_doseogwan"))
+    Command::new(env!("CARGO_BIN_EXE_benedict"))
         .args(args)
         .env_clear()
         .env("PATH", "/no-external-programs")

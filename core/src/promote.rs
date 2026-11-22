@@ -21,7 +21,7 @@ pub fn run(config: &Path, key: Option<&str>, args: &[String]) -> Result<Value, S
     }
     let source = field("source")?;
     let link = format!(
-        "Room evidence: doseogwan recall --library {library} --id {}",
+        "Room evidence: benedict recall --library {library} --id {}",
         entry["id"]
     );
     let refs = if source.is_empty() {
