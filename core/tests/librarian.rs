@@ -5,7 +5,7 @@ fn librarian_reindexes_scores_and_records_each_real_cycle() {
     let tmp = tempfile::tempdir().unwrap();
     let base = tmp.path();
     let run = |args: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_doseogwan"))
+        Command::new(env!("CARGO_BIN_EXE_benedict"))
             .current_dir(base)
             .env("LIBRARY_CONFIG", base.join("library.json"))
             .env("LIBRARY_DB", base.join("evidence.sqlite"))

@@ -5,8 +5,39 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-22
+
+The first versioned public release. Check what is installed with `.benedict/library version`; `room ping` also
+reports the running version.
+
+### Changed
+
+- One name: the command is `benedict` (was `doseogwan`), the Rust package is `benedict`, the default image is
+  `benedict-local` and the environment variables are `BENEDICT_APP`, `BENEDICT_CLI` and `BENEDICT_BIN`. The record
+  table is `benedict_room_records`; the first write after the upgrade renames the earlier table, so its records stay.
+  To upgrade an installed project, run `bin/install-project` again with the same workspace so its launcher calls the
+  new command.
+- The README's install section is four numbered steps: get Benedict, install into a project, check the connection,
+  try it with an agent. The Compose sample and the Python commands moved out of the README; the Python commands are
+  in `docs/python-compat.md`, which the quickstart test now runs.
+
 ### Fixed
 
+- Search finds a word written with its ending: `반품` matches `반품하려면` and `반품은`, and `return` matches
+  `returned`. A query word of two or more Hangul syllables matches indexed words that begin with its longest part
+  (two syllables or more) found in the library; another word of four or more characters matches indexed words that
+  begin with it. Shorter words still match whole words. The index format is unchanged, so existing indexes keep
+  working.
+- The example refund policy has a Korean sentence as well, so the README's first question finds it in either
+  language.
+- A search with no hits says why in a `hint`: when the query is Korean and the library holds no Korean words, it
+  asks for the documents' language; otherwise it suggests the documents' own or fewer words. Agents no longer read
+  an empty result as "no source".
+- The Python compatibility search (`bin/library.py search`) uses the built Rust CLI (`BENEDICT_BIN`, `benedict`
+  on PATH, or this checkout's `core/target` build) for registries the Rust CLI handles, so both clients rank and
+  explain results the same way. Registries with advanced policies keep the policy-aware Python search.
+- The project launcher written by `bin/install-project` runs Compose with `--progress quiet`, so an agent reads the
+  command's JSON without container progress lines.
 - Filing accepts nonblank answers of any length in both the local and SQL-backed writers.
 
 - courier: output over `COURIER_SHOW` with 60 lines or fewer came back whole. Head and tail now fit within the
@@ -31,6 +62,8 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `doseogwan version` (also `--version`) prints `{"version": "..."}`, and `room ping` reports the running version.
+  Every crate, this changelog's newest release and the CLI name one version; a test keeps them equal.
 - `LIBRARY_CENTRAL_HITS`: print only the first N of the central library's hits. Heading and record lines stay, one
   line names how many more there are, and `--all` prints them. Unset prints every hit, as before.
 - `courier --write <path> [--replace]` / `courier --edit <path>`: file work through the courier — content or

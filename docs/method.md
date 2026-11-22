@@ -1,6 +1,6 @@
 # Library method
 
-In a Docker installation, room observations are retained in the project database and in a bounded shared memory window. Pass the user’s exact wording with `--question` and the agent’s search terms separately. The librarian files a reusable answered observation with `doseogwan file --id RECORD`; the wiki page retains the original question, answer and evidence. Original shelf files stay on the selected storage.
+In a Docker installation, room observations are retained in the project database and in a bounded shared memory window. Pass the user’s exact wording with `--question` and the agent’s search terms separately. The librarian files a reusable answered observation with `benedict file --id RECORD`; the wiki page retains the original question, answer and evidence. Original shelf files stay on the selected storage.
 
 ## How agents work in the library
 

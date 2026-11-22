@@ -1,6 +1,6 @@
 # Services share a project data volume and a private room socket.
 x-runtime: &runtime
-  image: ${LIBRARY_IMAGE:-doseogwan-local}
+  image: ${LIBRARY_IMAGE:-benedict-local}
   build: .
   user: "10001:10001"
   mem_limit: ${LIBRARY_MEMORY_LIMIT:-512m}
@@ -26,7 +26,7 @@ services:
     volumes:
       - library_data:/data
     healthcheck:
-      test: ["CMD", "doseogwan", "room", "ping"]
+      test: ["CMD", "benedict", "room", "ping"]
       interval: 2s
       timeout: 2s
       retries: 15

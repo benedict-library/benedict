@@ -428,6 +428,15 @@ fn search_one(reg: &Registry, key: &str, query: &str, top: usize) -> Result<Valu
     }
     let indexed_at = record["indexed_at"].as_str().ok_or(invalid)?;
     let shelf = reg.shelf_root(key)?;
+    let vocabulary: BTreeSet<&str> = counts
+        .values()
+        .filter_map(Value::as_object)
+        .flat_map(|c| c.keys().map(String::as_str))
+        .collect();
+    let stems: BTreeMap<&String, &str> = words
+        .iter()
+        .filter_map(|w| stem(w, &vocabulary).map(|s| (w, s)))
+        .collect();
     let mut df = BTreeMap::new();
     let mut total = 0.0;
     let mut candidates = Vec::new();
@@ -438,8 +447,14 @@ fn search_one(reg: &Registry, key: &str, query: &str, top: usize) -> Result<Valu
         total += length;
         let mut matches = Vec::new();
         for word in &words {
-            if let Some(freq) = counter.get(word) {
-                let freq = freq.as_u64().ok_or(invalid)?;
+            let found = match stems.get(word) {
+                Some(stem) => prefixed(counter, stem).ok_or(invalid)?,
+                None => match counter.get(word) {
+                    Some(freq) => Some(freq.as_u64().ok_or(invalid)?),
+                    None => None,
+                },
+            };
+            if let Some(freq) = found {
                 *df.entry(word).or_insert(0) += 1;
                 if freq > 0 {
                     matches.push((word, freq as f64));
@@ -476,7 +491,56 @@ fn search_one(reg: &Registry, key: &str, query: &str, top: usize) -> Result<Valu
         let title = text.lines().find(|s| s.starts_with("# ")).map(|s| s.trim_start_matches(['#',' '])).unwrap_or(path);
         json!({"path":path,"title":title,"score":(score*1e6).round_ties_even()/1e6,"excerpt":text.chars().take(500).collect::<String>()})
     }).collect();
-    Ok(json!({"library":key,"engine":"lexical-bm25","indexed_at":indexed_at,"hits":hits}))
+    let mut result = json!({"library":key,"engine":"lexical-bm25","indexed_at":indexed_at,"hits":hits});
+    if hits_empty(&result) {
+        let korean_query = words.iter().any(|w| w.chars().any(hangul));
+        let korean_documents = vocabulary.iter().any(|w| w.chars().any(hangul));
+        result["hint"] = json!(if korean_query && !korean_documents {
+            "The library's documents contain no Korean words, and search matches words, not meanings. Search again with words in the documents' language."
+        } else {
+            "No document contains these words. Search matches words, not meanings, so try the words the documents use, or fewer words."
+        });
+    }
+    Ok(result)
+}
+
+fn hits_empty(result: &Value) -> bool {
+    result["hits"].as_array().is_some_and(Vec::is_empty)
+}
+
+fn hangul(c: char) -> bool {
+    ('\u{AC00}'..='\u{D7A3}').contains(&c)
+}
+
+/// A word in the text often carries an ending: "반품하려면" and "반품은" for "반품", "returned" for "return". The search
+/// counts every indexed word that begins with the returned part. For a query word of two or more Hangul syllables it is
+/// the longest leading part of at least two syllables that begins some indexed word; for another word of four or more
+/// characters it is the word itself. Shorter words match only whole words.
+fn stem<'a>(word: &str, vocabulary: &BTreeSet<&'a str>) -> Option<&'a str> {
+    let length = word.chars().count();
+    let ends: Vec<usize> = if length >= 2 && word.chars().all(hangul) {
+        word.char_indices().map(|(i, _)| i).skip(2).chain([word.len()]).collect()
+    } else if length >= 4 {
+        vec![word.len()]
+    } else {
+        return None;
+    };
+    ends.iter().rev().find_map(|&end| {
+        let part = &word[..end];
+        let from = (std::ops::Bound::Included(part), std::ops::Bound::Unbounded);
+        let next: &'a str = *vocabulary.range::<str, _>(from).next()?;
+        next.starts_with(part).then(|| &next[..end])
+    })
+}
+
+/// The summed count of the document's words that begin with `stem`; `None` inside when it has none, and `None`
+/// outside when a count is not a number.
+fn prefixed(counter: &serde_json::Map<String, Value>, stem: &str) -> Option<Option<u64>> {
+    let mut sum = None;
+    for (_, freq) in counter.iter().filter(|(w, _)| w.starts_with(stem)) {
+        *sum.get_or_insert(0) += freq.as_u64()?;
+    }
+    Some(sum)
 }
 
 fn read(reg: &Registry, key: &str, path: &str) -> Result<Value> {

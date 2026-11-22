@@ -84,12 +84,13 @@ done
   printf 'project=%q\n' "$project"
   cat <<'ENTRY'
 # Agents running in this installation's library container use its native client.
-if [[ ${LIBRARY_PROJECT:-} == "$project" && -S ${LIBRARY_ROOM_SOCKET:-/nonexistent} ]] && command -v doseogwan >/dev/null; then
-  exec doseogwan "$@"
+if [[ ${LIBRARY_PROJECT:-} == "$project" && -S ${LIBRARY_ROOM_SOCKET:-/nonexistent} ]] && command -v benedict >/dev/null; then
+  exec benedict "$@"
 fi
 ENTRY
   printf 'export LIBRARY_IMAGE=%q\n' "$image"
-  printf 'exec docker compose -p %q -f %q -f %q run --rm -T library "$@"\n' "$project" "$base" "$profile"
+  # Quiet progress: the agent reads the command's JSON, not Compose's container lines.
+  printf 'exec docker compose --progress quiet -p %q -f %q -f %q run --rm -T library "$@"\n' "$project" "$base" "$profile"
 } >"$stage/library"
 chmod 755 "$stage/library"
 if [[ -L $state/library || ( -e $state/library && ! -f $state/library ) ]]; then

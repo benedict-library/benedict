@@ -28,72 +28,45 @@ Shelf originals are mounted read-only. Each room records work in memory and the 
 
 1. **Find the earlier work.** Look up relevant decisions and skills in the search room. Open the original in the reading room and check whether the earlier conditions still apply.
 2. **Work from shared evidence.** Put the question and its source together in a meeting-room task. Agents and personas record what they noticed and how they reached their judgments. A later reader can examine the reasons on both sides of a disagreement.
-3. **Leave a starting point.** File the decision, its reason, the source and any open question. When new evidence arrives, a librarian can review the affected explanations and procedures and refresh the index. In the librarian room, record a synthesis with its source references. Publish that record as an encyclopedia entry with `doseogwan file --id ID --as concept`; the page links back to the evidence.
+3. **Leave a starting point.** File the decision, its reason, the source and any open question. When new evidence arrives, a librarian can review the affected explanations and procedures and refresh the index. In the librarian room, record a synthesis with its source references. Publish that record as an encyclopedia entry with `benedict file --id ID --as concept`; the page links back to the evidence.
 
 Start with a central library of your own and set up separate collections for projects or specialist subjects. Decide which libraries each may consult. Where even filenames must remain private, use separate storage and operating-system permissions. [Library method](docs/method.md) · [Security](SECURITY.md)
 
-## Install for your project
+## Install
 
-Ask your agent to “install Benedict for this project.” It will show which folders and project instructions it will use and ask for approval.
+You need Docker and jq. Follow along in Ubuntu on [WSL 2](https://docs.docker.com/desktop/features/wsl/) on Windows, in a terminal with Docker Desktop running on macOS, or in a terminal that can use Docker Engine on Linux.
 
-**Install from a terminal.** Choose your environment below. Run the shared commands in Bash, starting in the Benedict checkout. Keep the checkout in place after installation: the project launcher refers to its Compose file.
-
-| System | Terminal and prerequisites | Example existing project |
-|---|---|---|
-| Windows | Open Bash in a WSL 2 Linux distribution such as Ubuntu. Enable that distribution in [Docker Desktop’s WSL integration](https://docs.docker.com/desktop/features/wsl/) and install jq inside it. | `/home/alex/projects/notes` |
-| macOS | Start Docker Desktop, install jq, and open Bash in Terminal with `bash`. | `/Users/alex/projects/notes` |
-| Linux | Open Bash with jq, Docker Engine and the Compose plugin installed. Your account needs access to the running Docker engine. | `/home/alex/projects/notes` |
-
-Check the tools in that terminal. Replace the example path with the absolute path of your existing project directory.
+**1. Get Benedict.**
 
 ```bash
-docker info >/dev/null && docker compose version && jq --version
+git clone https://github.com/benedict-library/benedict.git
+cd benedict
 ```
 
-Once the checks pass, install and confirm the connection:
+Keep this folder after installing: your project opens its library with the settings in it.
+
+**2. Install it into your project folder.** Start with the bundled example the first time.
 
 ```bash
-project_dir="/absolute/path/to/your/project"
-bin/install-project "$project_dir"
-"$project_dir/.benedict/library" room ping
+bin/install-project --start example ~/projects/notes
 ```
 
-Choose an existing wiki, the bundled example, or an empty library when prompted. A successful ping includes `"ready":true`. Start a new agent session in the project to use its library. For unattended setup or an existing shelf, see the [installation guide](docs/docker-setup.md).
+Replace `~/projects/notes` with your project folder (create it first if it does not exist). To start from your own wiki, use `--wiki WIKI_FOLDER` instead of `--start example`.
 
-## Try the sample
-
-Open this checkout in your agent and ask:
-
-> Read the agent guide and create a sample library. Find the return policy, read the original and file the question and answer so another session can check the source.
-
-From the repository root, start a sample library with Docker Compose. Each command runs the Rust CLI, `doseogwan`, in a fresh container using the same volume. [Agent installation guide](docs/docker-setup.md)
-
-```sh
-docker compose -p benedict-demo build library
-docker compose -p benedict-demo run --rm -T -e LIBRARY_START=example library setup --activate
-library() { docker compose -p benedict-demo run --rm -T library "$@"; }
-library read entities/refund.md
-library save --refs entities/refund.md "What is the return window?" "Unused products may be returned within 14 days under the sample policy."
-library search "return window"
-```
-
-Open the filed answer in the last search result to follow its reference back to the policy.
-
-<details>
-<summary>Legacy Python compatibility commands</summary>
+**3. Check the connection.**
 
 ```bash
-python3 bin/library.py init --config /tmp/library-demo/library.json --demo
-library() { python3 bin/library.py "$1" --config /tmp/library-demo/library.json "${@:2}"; }
-library read --library main entities/refund.md
-library save --library main "When can an unused product be returned?" \
-  "The sample refund policy allows unused products to be returned within 14 days. For a used product, the cited page does not specify a return window." \
-  --refs entities/refund.md
-library search "refund"
+~/projects/notes/.benedict/library room ping
 ```
 
-The last search returns both the sample policy and the answer you just filed. Give a fresh session the registry path and ask it to find the return window and its source. The handoff works when it can follow the filed answer back to the original policy.
+`"ready":true` and the installed version mean the installation is done.
 
-</details>
+**4. Try it.** Open a new agent session in that project folder and ask:
+
+> Find the return window with its source, and leave it so the next session can continue.
+
+The agent reads the project instructions the installer added (AGENTS.md, CLAUDE.md, GEMINI.md) and uses the library.
+
+You can also ask an agent to “install Benedict for this project”; it follows the same steps. To upgrade, run `git pull` in this folder and then `bin/install-project ~/projects/notes` again (`--start` is only for the first installation). See the [changelog](CHANGELOG.md) for what each version changed, the [installation guide](docs/docker-setup.md) for unattended setup and shelf or PostgreSQL connections, and the [Python compatibility commands](docs/python-compat.md) to try it without Docker.
 
 [Runtime and storage](docs/portability.md) · [Room commands and examples](docs/agent-usage.md) · [Courier](docs/courier.md) · [Plaza](docs/plaza.md) · [Verification](docs/verification.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [MIT license](LICENSE)

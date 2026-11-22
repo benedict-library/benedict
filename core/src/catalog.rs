@@ -32,7 +32,7 @@ pub(crate) fn seed_example(root: &Path) -> Result<()> {
     const PAGES: [(&str, &str); 2] = [
         (
             "refund.md",
-            "# Synthetic refund policy\nUnused fictional products may be returned within 14 days.\n",
+            "# Synthetic refund policy\nUnused fictional products may be returned within 14 days.\n사용하지 않은 가상 제품은 14일 안에 반품할 수 있습니다.\n",
         ),
         (
             "shipping.md",
@@ -374,7 +374,7 @@ pub fn file_receipt(config: &Path, key: &str, title: &str, body: &str, url: &str
         return save(config, Some(key), &mut args, false);
     }
     let out = std::process::Command::new("python3")
-        .env_remove("DOSEOGWAN_CLI")
+        .env_remove("BENEDICT_CLI")
         .arg(crate::app().join("bin/library.py"))
         .arg("save")
         .arg("--config")

@@ -2,7 +2,7 @@ use serde_json::Value;
 use std::process::{Command, Output};
 
 fn call(db: &std::path::Path, project: &str, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_doseogwan"))
+    Command::new(env!("CARGO_BIN_EXE_benedict"))
         .env("LIBRARY_DB", db)
         .env("LIBRARY_PROJECT", project)
         .env_remove("LIBRARY_DB_URL")
@@ -18,6 +18,20 @@ fn value(output: Output) -> Value {
         String::from_utf8_lossy(&output.stderr)
     );
     serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[test]
+fn records_kept_under_the_name_before_0_2_0_are_still_recalled() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("library.sqlite3");
+    let old = value(call(&db, "central", &["record", "--room", "search", "--question", "이전 기록"]));
+    rusqlite::Connection::open(&db)
+        .unwrap()
+        .execute_batch("ALTER TABLE benedict_room_records RENAME TO doseogwan_room_records")
+        .unwrap();
+    value(call(&db, "central", &["record", "--room", "search", "--question", "새 기록"]));
+    let id = old["id"].to_string();
+    assert_eq!(value(call(&db, "central", &["recall", "--id", &id])), old);
 }
 
 #[test]

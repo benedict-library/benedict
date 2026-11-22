@@ -56,7 +56,7 @@ fn source_checkout_can_hand_over_a_filed_answer_in_an_isolated_home() {
             .env("USERPROFILE", root)
             .env("DATABASE_URL", "must-not-connect")
             .env("LIBRARY_ROOM_CMD", "invalid-command")
-            .env_remove("DOSEOGWAN_CLI");
+            .env_remove("BENEDICT_CLI");
         serde_json::from_str(&checked(&mut cmd)).unwrap()
     };
     invoke("init", &["--demo"]);
@@ -106,8 +106,8 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 #[test]
-fn english_and_korean_readme_quickstarts_file_searchable_answers() {
-    for name in ["README.md", "README.ko.md"] {
+fn python_compatibility_quickstart_files_a_searchable_answer() {
+    for name in ["docs/python-compat.md"] {
         let temp = tempfile::tempdir().unwrap();
         let doc = fs::read_to_string(repo_root().join(name)).unwrap();
         let source = doc
@@ -135,7 +135,7 @@ fn english_and_korean_readme_quickstarts_file_searchable_answers() {
                 .current_dir(repo_root())
                 .env("HOME", temp.path())
                 .env_remove("LIBRARY_ROOM_HOME")
-                .env_remove("DOSEOGWAN_CLI"),
+                .env_remove("BENEDICT_CLI"),
         );
         let rows: Vec<Value> = output
             .lines()

@@ -97,7 +97,7 @@ impl Library {
         let mut cmd = Command::new(python());
         for (k, _) in std::env::vars_os() {
             if k.to_string_lossy().starts_with("LIBRARY_")
-                || k == "DOSEOGWAN_CLI"
+                || k == "BENEDICT_CLI"
                 || k == "DATABASE_URL"
             {
                 cmd.env_remove(k);

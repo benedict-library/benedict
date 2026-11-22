@@ -5,7 +5,7 @@ fn file_preserves_original_and_rejects_unanswered_or_unrelated_rows() {
     let temp = tempfile::tempdir().unwrap();
     let cfg = temp.path().join("library.json");
     let run = |args: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_doseogwan"))
+        Command::new(env!("CARGO_BIN_EXE_benedict"))
             .args(args)
             .env_remove("LIBRARY_DB_URL")
             .env_remove("LIBRARY_ROOM_SOCKET")
@@ -127,7 +127,7 @@ fn file_preserves_original_and_rejects_unanswered_or_unrelated_rows() {
         q,
         "59 units",
         "shelf/A7.md",
-        &format!("doseogwan recall --library research --id {id}"),
+        &format!("benedict recall --library research --id {id}"),
     ] {
         assert!(page.contains(text));
     }

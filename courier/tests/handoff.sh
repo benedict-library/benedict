@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run against the real Rust room service and a fresh SQLite database.
 set -euo pipefail
-entry=${1:?pass the doseogwan executable}
+entry=${1:?pass the benedict executable}
 courier=${2:?pass the courier executable}
 work=$(mktemp -d)
 export LIBRARY_ROOM_SOCKET="$work/room.sock" LIBRARY_DB="$work/room.sqlite"
