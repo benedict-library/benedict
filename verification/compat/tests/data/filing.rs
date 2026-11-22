@@ -143,7 +143,7 @@ fn reports_are_filed_before_delivery() {
 fn settings_are_available_without_a_user_home() {
     let l = Library::empty();
     l.put("search.env", "LIBRARY_ROOM_CMD=room-example");
-    let read = "from unittest.mock import patch\nimport search\nos.environ.pop('LIBRARY_SEARCH_ENV',None)\nif sys.argv[1]: os.environ['LIBRARY_SEARCH_ENV']=sys.argv[1]\nos.environ['LIBRARY_MAIL_FROM']='reader'\nwith patch.object(Path,'home',side_effect=RuntimeError('no home')): print(json.dumps(search.settings()))";
+    let read = "from unittest.mock import patch\nimport common\nos.environ.pop('LIBRARY_SEARCH_ENV',None)\nif sys.argv[1]: os.environ['LIBRARY_SEARCH_ENV']=sys.argv[1]\nos.environ['LIBRARY_MAIL_FROM']='reader'\nwith patch.object(Path,'home',side_effect=RuntimeError('no home')): print(json.dumps(common.settings()))";
     assert_eq!(
         value(
             l.bridge(read, &[&l.path("search.env").display().to_string()]),

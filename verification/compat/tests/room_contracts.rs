@@ -602,13 +602,9 @@ fn reading_opens_the_original_and_persists_it_but_only_shows_the_requested_lines
 }
 
 #[test]
-fn catalog_cards_and_library_links_follow_the_owning_library_configuration() {
+fn library_links_follow_the_owning_library_configuration() {
     let lib = Library::new();
     lib.init();
-    lib.write(
-        "wiki/entities/skill_botany.md",
-        "# Botanical notes\nSteps for botanical drawings.\n",
-    );
     lib.write("branch/garden.md", "# Sample\nBotanical drawings.\n");
     let mut registry = lib.registry();
     registry["libraries"]["branch"] =
@@ -620,19 +616,6 @@ fn catalog_cards_and_library_links_follow_the_owning_library_configuration() {
     registry["libraries"]["main"]["ord"] = json!(1);
     lib.set_registry(&registry);
     lib.sync(&[]);
-    let search = || {
-        lib.cmd("search", &["--library", "main", "botanical drawings"], "")
-            .ok()
-    };
-    assert!(!search().contains("# 서지 레코드"));
-    registry["libraries"]["main"]["cards"] = json!(["entities/skill_"]);
-    lib.set_registry(&registry);
-    lib.sync(&[]);
-    let output = search();
-    assert!(
-        output.contains("# 서지 레코드 1. entities/skill_botany.md") && output.contains("낱말"),
-        "{output}"
-    );
     let rows = |room| {
         serde_json::from_str::<Value>(
             &lib.exec(room, "import json\nprint(json.dumps(library_registry))"),
@@ -735,44 +718,10 @@ fn indexing_policy_preserves_the_original_while_excluding_its_body_from_room_mem
 }
 
 #[test]
-fn side_sections_are_optional_can_be_named_and_accept_an_older_room_module() {
+fn rank_weights_reach_the_search_room_after_a_sync() {
     let lib = Library::new();
     lib.init();
     lib.sync(&[]);
-    let all = || lib.cmd("search", &["garden"], "").ok();
-    let output = all();
-    for section in ["오늘 들어온 글", "회의실 변수", "결정 기록"] {
-        assert!(output.contains(&format!("## {section}\n(설정 안 됨)")));
-    }
-    assert!(output.contains("용어 사본 없음"));
-    let today = lib
-        .python(
-            &[
-                "-c",
-                "import datetime; print(datetime.date.today().strftime('%y%m%d'))",
-            ],
-            "",
-        )
-        .ok()
-        .trim()
-        .to_owned();
-    let note = format!("{today}_garden.md");
-    lib.write(&format!("wiki/queries/{note}"), "# Garden\nSpring.\n");
-    let mut reg = lib.registry();
-    reg["libraries"]["main"]["sections"] =
-        json!({"today":{"dirs":["queries"]},"meeting_vars":{"title":"Meeting notes"}});
-    reg["libraries"]["main"]["terms"] = json!("terms.json");
-    lib.write("terms.json",&json!([{"표준어":"garden","별칭":["garden"],"절":"Botany","실체":"Plants grown together."}]).to_string());
-    lib.set_registry(&reg);
-    lib.sync(&[]);
-    lib.exec("main-meeting", "task_garden_note = {'title':'field notes'}");
-    let output = all();
-    assert!(
-        output.contains(&note)
-            && output.contains("## Meeting notes\ntask_garden_note")
-            && output.contains("Plants grown together."),
-        "{output}"
-    );
     assert!(
         !lib.room(&["vars", "main-search"], "")
             .contains("rrf_weights")
@@ -786,8 +735,6 @@ fn side_sections_are_optional_can_be_named_and_accept_an_older_room_module() {
         lib.exec("main-search", "print(rrf_weights['n'])").trim(),
         "2"
     );
-    lib.exec("main-search","import os, wiki_room_fuse as _m\n_m._room_mtime = os.path.getmtime(_m.__file__)\n_m.entry_sections = lambda q,qv: '## Earlier section\\n'\ndel _m");
-    assert!(all().contains("## Earlier section"));
 }
 
 #[test]

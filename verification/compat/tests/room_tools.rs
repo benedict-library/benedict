@@ -173,7 +173,7 @@ fn room_tools_trace_their_role_prompt_result_and_exit_status() {
     for (tool, _) in tools {
         room.run(tool, &["--help"], "");
     }
-    let probe = "import search;search.trace(search.settings(),'search','public question','queries/demo.md',1.5)";
+    let probe = "import common;common.trace(common.settings(),'search','public question','queries/demo.md',1.5)";
     assert!(
         room.command()
             .current_dir(repo_root().join("bin"))

@@ -84,6 +84,6 @@ if __name__ == "__main__":
     if native := os.environ.get("BENEDICT_CLI"):
         os.execv(native, [native, *sys.argv[1:]])
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    import search  # noqa: E402  (UTF-8 in and out, as every tool)
-    search.utf8_stdio()
+    import common  # noqa: E402  (UTF-8 in and out, as every tool)
+    common.utf8_stdio()
     sys.exit(main())
