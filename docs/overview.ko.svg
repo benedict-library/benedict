@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="494" viewBox="0 0 960 494" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>도서관: 사람과 에이전트가 검색 명령 하나로 묻고, 실(메모리+DB)이 답하며, 사서가 도서관마다 위키·서가와 실을 맞추고, 답은 서류철에 남고, 등록부 하나가 모든 도서관 설정을 가진다</title>
+  <defs>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2F81F7"/></marker>
+    <marker id="o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#BF8700"/></marker>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1A7F37"/></marker>
+  </defs>
+  <rect width="960" height="494" rx="16" fill="#FFFFFF"/>
+<rect x="24" y="48" width="236" height="336" rx="14" fill="#F6F8FA" stroke="#D0D7DE"/>
+<text x="44" y="78" font-size="17" font-weight="700" fill="#1F2328">사람과 에이전트</text>
+<rect x="44" y="104" width="196" height="54" rx="8" fill="#FFFFFF" stroke="#8C959F"/><text x="56" y="124" font-size="13" font-weight="600" fill="#1F2328">사람</text><text x="56" y="142" font-size="11" fill="#57606A">대화창·웹 화면·메신저</text>
+<rect x="44" y="174" width="196" height="54" rx="8" fill="#FFFFFF" stroke="#8C959F"/><text x="56" y="194" font-size="13" font-weight="600" fill="#1F2328">에이전트</text><text x="56" y="212" font-size="11" fill="#57606A">어떤 CLI·서비스든</text>
+<rect x="300" y="48" width="300" height="84" rx="14" fill="#F6F8FA" stroke="#D0D7DE"/>
+<text x="320" y="78" font-size="16" font-weight="700" fill="#1F2328">검색 — bin/search.py</text>
+<text x="320" y="102" font-size="12" fill="#57606A">읽을 수 있는 모든 도서관, 또는 하나</text>
+<rect x="300" y="164" width="300" height="220" rx="14" fill="#F6F8FA" stroke="#D0D7DE"/>
+<text x="320" y="194" font-size="16" font-weight="700" fill="#1F2328">실 — 메모리 + DB</text>
+<rect x="320" y="212" width="126" height="72" rx="8" fill="#FFFFFF" stroke="#8C959F"/><text x="332" y="232" font-size="13" font-weight="600" fill="#1F2328">검색실</text><text x="332" y="250" font-size="11" fill="#57606A">색인</text>
+<rect x="454" y="212" width="126" height="72" rx="8" fill="#FFFFFF" stroke="#8C959F"/><text x="466" y="232" font-size="13" font-weight="600" fill="#1F2328">열람실</text><text x="466" y="250" font-size="11" fill="#57606A">읽고 있는 문서</text>
+<rect x="320" y="294" width="126" height="72" rx="8" fill="#FFFFFF" stroke="#8C959F"/><text x="332" y="314" font-size="13" font-weight="600" fill="#1F2328">회의실</text><text x="332" y="332" font-size="11" fill="#57606A">함께 쓰는 과제 변수</text>
+<rect x="454" y="294" width="126" height="72" rx="8" fill="#FFFFFF" stroke="#8C959F"/><text x="466" y="314" font-size="13" font-weight="600" fill="#1F2328">사서실</text><text x="466" y="332" font-size="11" fill="#57606A">동기화 일지·점검</text>
+<rect x="660" y="48" width="276" height="190" rx="14" fill="#F6F8FA" stroke="#D0D7DE"/>
+<text x="680" y="78" font-size="16" font-weight="700" fill="#1F2328">위키 — 마크다운</text>
+<text x="680" y="100" font-size="12" fill="#57606A">도서관마다 git 레포 하나</text>
+<rect x="680" y="118" width="236" height="30" rx="8" fill="#FFFFFF" stroke="#8C959F"/><text x="692" y="137.0" font-size="13" font-weight="600" fill="#1F2328">백과사전</text>
+<rect x="680" y="156" width="236" height="30" rx="8" fill="#FFFFFF" stroke="#8C959F"/><text x="692" y="175.0" font-size="13" font-weight="600" fill="#1F2328">스킬</text>
+<rect x="680" y="194" width="236" height="30" rx="8" fill="#FFFFFF" stroke="#8C959F"/><text x="692" y="213.0" font-size="13" font-weight="600" fill="#1F2328">서류철</text>
+<rect x="660" y="274" width="276" height="110" rx="14" fill="#F6F8FA" stroke="#D0D7DE"/>
+<text x="680" y="304" font-size="16" font-weight="700" fill="#1F2328">서가 — 원본 파일</text>
+<text x="680" y="326" font-size="12" fill="#57606A">네트워크 저장소, 백업도 여기</text>
+<rect x="24" y="412" width="912" height="58" rx="14" fill="#FFF8C5" stroke="#D4A72C"/>
+<text x="44" y="437" font-size="15" font-weight="700" fill="#1F2328">등록부 — 표 하나, 도서관마다 한 줄</text>
+<text x="44" y="457" font-size="12" fill="#57606A">위키 자리 · 실 · 검색 방식 · 정답지 · 저장 규칙 — 도구는 부를 때마다 읽고 사본을 두지 않는다</text>
+<path d="M260,90 H296" fill="none" stroke="#2F81F7" stroke-width="2" marker-end="url(#b)"/>
+<text x="278" y="84" font-size="11" text-anchor="middle" fill="#2F81F7">묻기</text>
+<path d="M450,132 V160" fill="none" stroke="#2F81F7" stroke-width="2" marker-end="url(#b)"/>
+<text x="458" y="151" font-size="11" fill="#2F81F7">찾기</text>
+<path d="M300,330 H264" fill="none" stroke="#2F81F7" stroke-width="2" marker-end="url(#b)"/>
+<text x="282" y="322" font-size="11" text-anchor="middle" fill="#2F81F7">답</text>
+<path d="M660,186 L604,230" fill="none" stroke="#BF8700" stroke-width="2" marker-end="url(#o)"/>
+<text x="652" y="158" font-size="11" text-anchor="end" fill="#BF8700">사서가 색인</text>
+<path d="M798,274 V242" fill="none" stroke="#BF8700" stroke-width="2" marker-end="url(#o)"/>
+<text x="806" y="262" font-size="11" fill="#BF8700">사서가 정리</text>
+<path d="M142,48 V24 H936 V209 H920" fill="none" stroke="#1A7F37" stroke-width="2" marker-end="url(#g)"/>
+<text x="540" y="18" font-size="11" text-anchor="middle" fill="#1A7F37">답을 서류철에 남기기</text>
+</svg>

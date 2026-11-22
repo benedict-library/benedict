@@ -1,0 +1,2 @@
+{"q":"refund","answer_doc":"entities/refund.md","keys":["14 days|two weeks","unused"],"src":"synthetic demonstration; not real user data","made_by":"synthetic"}
+{"q":"shipping","answer_doc":["entities/shipping.md"],"keys":["Monday"],"src":"synthetic demonstration; not real user data","made_by":"synthetic"}

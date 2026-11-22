@@ -1,0 +1,45 @@
+# Services share a project data volume and a private room socket.
+x-runtime: &runtime
+  image: ${LIBRARY_IMAGE:-doseogwan-local}
+  build: .
+  user: "10001:10001"
+  mem_limit: ${LIBRARY_MEMORY_LIMIT:-512m}
+
+x-library-mounts: &library-mounts
+  - library_data:/data
+  - ${LIBRARY_SHELF:-./examples/shelf}:/shelf:ro
+
+services:
+  library:
+    depends_on:
+      room:
+        condition: service_healthy
+    <<: *runtime
+    environment:
+      LIBRARY_ROOM_SOCKET: /data/rooms.sock
+    volumes: *library-mounts
+  room:
+    <<: *runtime
+    environment:
+      LIBRARY_ROOM_SOCKET: /data/rooms.sock
+    command: [room, serve]
+    volumes:
+      - library_data:/data
+    healthcheck:
+      test: ["CMD", "doseogwan", "room", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+  librarian:
+    profiles: [rooms]
+    <<: *runtime
+    environment:
+      LIBRARY_ROOM_SOCKET: /data/rooms.sock
+    depends_on:
+      room:
+        condition: service_healthy
+    restart: "on-failure:3"
+    command: [librarian, --config, /data/library.json, --golden, /app/examples/golden.jsonl, --iterations, "365", --interval, "86400"]
+    volumes: *library-mounts
+volumes:
+  library_data:

@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="494" viewBox="0 0 960 494" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>library: people and agents ask with one search command; rooms answer from memory and a database; a librarian keeps the rooms in step with each library's wiki and shelf; answers are filed back; one registry holds every library's settings</title>
+  <defs>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2F81F7"/></marker>
+    <marker id="o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#BF8700"/></marker>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1A7F37"/></marker>
+  </defs>
+  <rect width="960" height="494" rx="16" fill="#FFFFFF"/>
+<rect x="24" y="48" width="236" height="336" rx="14" fill="#F6F8FA" stroke="#D0D7DE"/>
+<text x="44" y="78" font-size="17" font-weight="700" fill="#1F2328">People and agents</text>
+<rect x="44" y="104" width="196" height="54" rx="8" fill="#FFFFFF" stroke="#8C959F"/><text x="56" y="124" font-size="13" font-weight="600" fill="#1F2328">a person</text><text x="56" y="142" font-size="11" fill="#57606A">chat, web page, messenger</text>
+<rect x="44" y="174" width="196" height="54" rx="8" fill="#FFFFFF" stroke="#8C959F"/><text x="56" y="194" font-size="13" font-weight="600" fill="#1F2328">an agent</text><text x="56" y="212" font-size="11" fill="#57606A">any CLI or service</text>
+<rect x="300" y="48" width="300" height="84" rx="14" fill="#F6F8FA" stroke="#D0D7DE"/>
+<text x="320" y="78" font-size="16" font-weight="700" fill="#1F2328">Search — bin/search.py</text>
+<text x="320" y="102" font-size="12" fill="#57606A">every library you may read, or one</text>
+<rect x="300" y="164" width="300" height="220" rx="14" fill="#F6F8FA" stroke="#D0D7DE"/>
+<text x="320" y="194" font-size="16" font-weight="700" fill="#1F2328">Rooms — memory + database</text>
+<rect x="320" y="212" width="126" height="72" rx="8" fill="#FFFFFF" stroke="#8C959F"/><text x="332" y="232" font-size="13" font-weight="600" fill="#1F2328">search room</text><text x="332" y="250" font-size="11" fill="#57606A">indexes</text>
+<rect x="454" y="212" width="126" height="72" rx="8" fill="#FFFFFF" stroke="#8C959F"/><text x="466" y="232" font-size="13" font-weight="600" fill="#1F2328">reading room</text><text x="466" y="250" font-size="11" fill="#57606A">pages being read</text>
+<rect x="320" y="294" width="126" height="72" rx="8" fill="#FFFFFF" stroke="#8C959F"/><text x="332" y="314" font-size="13" font-weight="600" fill="#1F2328">meeting room</text><text x="332" y="332" font-size="11" fill="#57606A">shared task variables</text>
+<rect x="454" y="294" width="126" height="72" rx="8" fill="#FFFFFF" stroke="#8C959F"/><text x="466" y="314" font-size="13" font-weight="600" fill="#1F2328">librarian room</text><text x="466" y="332" font-size="11" fill="#57606A">sync log, checks</text>
+<rect x="660" y="48" width="276" height="190" rx="14" fill="#F6F8FA" stroke="#D0D7DE"/>
+<text x="680" y="78" font-size="16" font-weight="700" fill="#1F2328">Wiki — Markdown</text>
+<text x="680" y="100" font-size="12" fill="#57606A">one git repo per library</text>
+<rect x="680" y="118" width="236" height="30" rx="8" fill="#FFFFFF" stroke="#8C959F"/><text x="692" y="137.0" font-size="13" font-weight="600" fill="#1F2328">encyclopedia</text>
+<rect x="680" y="156" width="236" height="30" rx="8" fill="#FFFFFF" stroke="#8C959F"/><text x="692" y="175.0" font-size="13" font-weight="600" fill="#1F2328">skills</text>
+<rect x="680" y="194" width="236" height="30" rx="8" fill="#FFFFFF" stroke="#8C959F"/><text x="692" y="213.0" font-size="13" font-weight="600" fill="#1F2328">filing cabinet</text>
+<rect x="660" y="274" width="276" height="110" rx="14" fill="#F6F8FA" stroke="#D0D7DE"/>
+<text x="680" y="304" font-size="16" font-weight="700" fill="#1F2328">Shelf — original files</text>
+<text x="680" y="326" font-size="12" fill="#57606A">network storage; backups land here too</text>
+<rect x="24" y="412" width="912" height="58" rx="14" fill="#FFF8C5" stroke="#D4A72C"/>
+<text x="44" y="437" font-size="15" font-weight="700" fill="#1F2328">Registry — one table, one row per library</text>
+<text x="44" y="457" font-size="12" fill="#57606A">wiki root · rooms · search kind · golden set · save rules — every tool reads it when called, nothing keeps a copy</text>
+<path d="M260,90 H296" fill="none" stroke="#2F81F7" stroke-width="2" marker-end="url(#b)"/>
+<text x="278" y="84" font-size="11" text-anchor="middle" fill="#2F81F7">ask</text>
+<path d="M450,132 V160" fill="none" stroke="#2F81F7" stroke-width="2" marker-end="url(#b)"/>
+<text x="458" y="151" font-size="11" fill="#2F81F7">find</text>
+<path d="M300,330 H264" fill="none" stroke="#2F81F7" stroke-width="2" marker-end="url(#b)"/>
+<text x="282" y="322" font-size="11" text-anchor="middle" fill="#2F81F7">answer</text>
+<path d="M660,186 L604,230" fill="none" stroke="#BF8700" stroke-width="2" marker-end="url(#o)"/>
+<text x="652" y="158" font-size="11" text-anchor="end" fill="#BF8700">librarian indexes</text>
+<path d="M798,274 V242" fill="none" stroke="#BF8700" stroke-width="2" marker-end="url(#o)"/>
+<text x="806" y="262" font-size="11" fill="#BF8700">librarian shelves</text>
+<path d="M142,48 V24 H936 V209 H920" fill="none" stroke="#1A7F37" stroke-width="2" marker-end="url(#g)"/>
+<text x="540" y="18" font-size="11" text-anchor="middle" fill="#1A7F37">save the answer to the filing cabinet</text>
+</svg>

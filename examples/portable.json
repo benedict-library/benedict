@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "libraries": {
+    "main": {
+      "wiki_root": "wiki",
+      "central": true,
+      "name": "Example library"
+    }
+  }
+}

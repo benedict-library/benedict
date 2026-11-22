@@ -1,0 +1,28 @@
+name: Report a bug
+description: Show where a library task stopped working.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: For security issues, use the private reporting instructions in SECURITY.md. Use sample documents and remove credentials or private notes from examples.
+  - type: input
+    id: environment
+    attributes:
+      label: Version and installation
+      description: Include the release or commit, operating system, and how you started Benedict.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Smallest example that reproduces the problem
+      description: Which command did you run, and what sample material did it use?
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and actual result
+      description: Include the error or the point where you lost the source.
+    validations:
+      required: true

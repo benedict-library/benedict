@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Run as the wiki user on the Docker host after journal replay.
+set -eu
+profile=${1:?expected installation profile}
+receipts=${2:?expected journal replay receipts}
+wiki=$(jq -er '[.services.library.volumes[] | select(.target == "/data/wiki") | .source] | if length == 0 then "" elif length == 1 then .[0] | split("$$") | join("$") else error("ambiguous wiki mount") end' "$profile")
+[[ -n $wiki ]] || exit 0
+pages=$(jq -er '.decisions | if type == "array" and length > 0 then .[].path | if type == "string" and test("^queries/[^/]+[.]md$") and (test("[[:cntrl:]]") | not) then . else error("invalid filing path") end else error("missing filing receipts") end' "$receipts")
+while IFS= read -r page; do
+  if ! [[ -f "$wiki/$page" && -w "$wiki/$page" ]] || ! head -c 1 -- "$wiki/$page" >/dev/null; then
+    echo "Host user cannot read and edit $wiki/$page" >&2
+    exit 1
+  fi
+done <<< "$pages"

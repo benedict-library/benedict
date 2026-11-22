@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# Activate an isolated library and register its entry point in the adopter's workspace.
+set -euo pipefail
+source_args=()
+case ${1:-} in
+  --start)
+    [[ ${2:-} == example || ${2:-} == empty ]] || { echo 'expected --start example or empty' >&2; exit 2; }
+    source_args=(--start "$2"); shift 2 ;;
+  --wiki)
+    [[ -n ${2:-} && -d $2 ]] || { echo 'select an existing wiki directory' >&2; exit 2; }
+    source_args=(--wiki "$(cd -- "$2" && pwd -P)"); shift 2 ;;
+esac
+if (( $# < 1 || $# > 2 )); then
+  echo 'usage: bin/install-project [--start example|empty | --wiki DIR] EXISTING_WORKSPACE [CONFIRMED_COMPOSE_PROFILE.json]' >&2
+  exit 2
+fi
+repo=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
+workspace=$(cd -- "$1" && pwd -P)
+if [[ $workspace == / || $workspace == "$(cd ~ && pwd -P)" ]]; then
+  echo 'select a project directory' >&2; exit 2
+fi
+state=$workspace/.benedict
+[[ ! -L $state ]] || { echo 'refusing a linked settings directory' >&2; exit 2; }
+if (( $# == 2 )); then
+  profile=$(cd -- "$(dirname -- "$2")" && pwd -P)/$(basename -- "$2")
+  project=$(jq -er '.name | strings | select(test("^[a-z0-9][a-z0-9_-]*$"))' "$profile")
+else
+  profile=$state/profile.json
+  if [[ -L $profile ]]; then echo 'refusing a linked profile' >&2; exit 2; fi
+  if [[ -f $profile ]]; then
+    project=$(jq -er '.name | strings | select(test("^[a-z0-9][a-z0-9_-]*$"))' "$profile")
+  else
+    # Keep the installation identity across repeat installs, independent of the checkout name.
+    project=benedict-$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')
+  fi
+fi
+if [[ -f $profile && ${#source_args[@]} -ne 0 ]]; then
+  echo 'This project already has a profile. Use that profile or choose a new workspace.' >&2
+  exit 2
+fi
+if [[ ! -f $profile && ${#source_args[@]} -eq 0 ]]; then
+  printf '%s\n' '어떤 자료로 시작할까요? 기존 위키 폴더 경로 / 예제로 시작(example) / 빈 도서관(empty)' >&2
+  if [[ ! -t 0 ]]; then echo 'Pass the user’s choice with --wiki DIR or --start example|empty.' >&2; exit 2; fi
+  IFS= read -r answer || exit 2
+  case "$answer" in
+    example|empty) source_args=(--start "$answer") ;;
+    *) [[ -n $answer && -d $answer ]] || { echo 'expected a wiki directory, example, or empty' >&2; exit 2; }
+       source_args=(--wiki "$(cd -- "$answer" && pwd -P)") ;;
+  esac
+fi
+mkdir -p -- "$state"
+if [[ ! -e $state/.gitignore && ! -L $state/.gitignore ]]; then printf '*\n' >"$state/.gitignore"; fi
+mkdir -- "$state/install.lock" || { echo 'another installation holds the project lock' >&2; exit 1; }
+stage=$state/install.lock
+trap 'rm -f -- "$stage/library" "$stage/AGENTS.md" "$stage/CLAUDE.md" "$stage/GEMINI.md" "$stage/profile.json"; rmdir -- "$stage"' EXIT
+image=${LIBRARY_IMAGE:-$project-library}
+base=$repo/compose.yaml
+start='<!-- Benedict project instructions -->'
+end='<!-- End Benedict project instructions -->'
+for name in AGENTS.md CLAUDE.md GEMINI.md; do
+  file=$workspace/$name
+  [[ ! -L $file && ( ! -e $file || -f $file ) ]] || { echo "cannot safely update $file" >&2; exit 2; }
+  if [[ -f $file ]]; then
+    cp -p -- "$file" "$stage/$name"
+    if grep -Fxq -e "$start" -e "$end" "$file"; then
+      awk -v start="$start" -v end="$end" -v guide="$repo/docs/install/workspace.md" '
+        $0 == start {
+          if (seen++) exit 2
+          inside=1; print
+          while ((getline line < guide) > 0) print line
+          close(guide); next
+        }
+        $0 == end { if (!inside) exit 2; inside=0 }
+        !inside { print }
+        END { if (inside || !seen) exit 2 }
+      ' "$file" >"$stage/$name" || { echo "invalid Benedict markers in $file" >&2; exit 2; }
+      continue
+    fi
+  fi
+  { printf '\n%s\n' "$start"; cat "$repo/docs/install/workspace.md"; printf '%s\n' "$end"; } >>"$stage/$name"
+done
+{
+  printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
+  printf 'project=%q\n' "$project"
+  cat <<'ENTRY'
+# Agents running in this installation's library container use its native client.
+if [[ ${LIBRARY_PROJECT:-} == "$project" && -S ${LIBRARY_ROOM_SOCKET:-/nonexistent} ]] && command -v doseogwan >/dev/null; then
+  exec doseogwan "$@"
+fi
+ENTRY
+  printf 'export LIBRARY_IMAGE=%q\n' "$image"
+  printf 'exec docker compose -p %q -f %q -f %q run --rm -T library "$@"\n' "$project" "$base" "$profile"
+} >"$stage/library"
+chmod 755 "$stage/library"
+if [[ -L $state/library || ( -e $state/library && ! -f $state/library ) ]]; then
+  echo 'refusing an unmanaged entry point' >&2; exit 2
+elif [[ -f $state/library ]] && ! cmp -s "$stage/library" "$state/library"; then
+  echo 'existing entry point uses different installation settings; use its original checkout and profile' >&2; exit 2
+fi
+docker build --quiet --tag "$image" "$repo"
+if (( $# == 1 )) && [[ ! -e $profile ]]; then
+  docker run --rm --user "$(id -u):$(id -g)" -v "$stage:/settings" "$image" setup --project "$project" "${source_args[@]}" --output /settings/profile.json
+  mv -- "$stage/profile.json" "$profile"
+fi
+export LIBRARY_IMAGE="$image"
+compose=(docker compose -p "$project" -f "$base" -f "$profile")
+"${compose[@]}" up -d --no-build --wait room
+"${compose[@]}" run --rm -T library setup --activate
+mv -- "$stage/library" "$state/library"
+for name in AGENTS.md CLAUDE.md GEMINI.md; do
+  if [[ ! -f $workspace/$name ]] || ! cmp -s "$stage/$name" "$workspace/$name"; then
+    mv -- "$stage/$name" "$workspace/$name"
+  fi
+done
+printf 'Benedict is ready in %s\n' "$workspace"
