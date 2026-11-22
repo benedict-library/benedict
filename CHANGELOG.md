@@ -5,6 +5,13 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The project entry point (`.benedict/library`) sends each command into the running room container with
+  `docker exec` instead of starting a new container for every command. A search no longer waits for a
+  container to start. To upgrade an installed project, delete its `.benedict/library` and run
+  `bin/install-project` again with the same workspace.
+
 ## [0.2.0] - 2026-11-22
 
 The first versioned public release. Check what is installed with `.benedict/library version`; `room ping` also
