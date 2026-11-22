@@ -21,9 +21,9 @@ w['shelve'].__globals__['receive']=lambda url, guard: (200, url, 'text/plain', b
 w['native_fetch'](sys.argv[2:])
 "#).unwrap();
     let run = |args: &[&str], expected: bool| {
-        let out = Command::new(env!("CARGO_BIN_EXE_doseogwan"))
+        let out = Command::new(env!("CARGO_BIN_EXE_benedict"))
             .args(args)
-            .env("DOSEOGWAN_APP", &app)
+            .env("BENEDICT_APP", &app)
             .env("REAL_TEST_APP", original_app)
             .env("LIBRARY_DB", base.join("records.sqlite"))
             .env_remove("LIBRARY_DB_URL")

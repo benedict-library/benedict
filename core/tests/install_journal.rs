@@ -8,7 +8,7 @@ use std::{
 };
 
 fn call(dir: &Path, args: &[&str], input: &[u8]) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_doseogwan"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_benedict"))
         .args(args)
         .current_dir(dir)
         .env_clear()
@@ -69,7 +69,7 @@ fn buffered_decisions_are_filed_once_after_parallel_retries() {
         "예제 자료로 시작하기",
         "기타 (직접 입력)",
         "(추천)",
-        "doseogwan recall",
+        "benedict recall",
     ] {
         assert!(page.contains(term), "{term}");
     }

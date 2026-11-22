@@ -17,7 +17,7 @@ fn a_new_agent_can_find_the_approved_skill_without_python() {
     )
     .unwrap();
     let run = |args: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_doseogwan"))
+        Command::new(env!("CARGO_BIN_EXE_benedict"))
             .env_clear()
             .env("PATH", &bin)
             .env("HOME", root)

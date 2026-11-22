@@ -17,7 +17,7 @@ pub fn call(cwd: &Path, code: &str, input: &Value, env: &[(&str, &str)]) -> Outp
     let mut cmd = Command::new(python());
     for (key, _) in std::env::vars_os() {
         let name = key.to_string_lossy();
-        if name.starts_with("LIBRARY_") || name.starts_with("DOSEOGWAN_") {
+        if name.starts_with("LIBRARY_") || name.starts_with("BENEDICT_") {
             cmd.env_remove(key);
         }
     }

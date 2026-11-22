@@ -10,7 +10,7 @@ fn existing_index_and_new_index_can_be_read_by_both_clients() {
     let legacy = Path::new(env!("CARGO_MANIFEST_DIR")).join("../bin/library.py");
     let run = |native: bool, args: &[&str]| {
         let mut command = if native {
-            Command::new(env!("CARGO_BIN_EXE_doseogwan"))
+            Command::new(env!("CARGO_BIN_EXE_benedict"))
         } else {
             let mut c = Command::new("python3");
             c.arg(&legacy);
@@ -19,6 +19,8 @@ fn existing_index_and_new_index_can_be_read_by_both_clients() {
         command
             .args(args)
             .current_dir(data)
+            // The compatibility client searches through this build of the Rust CLI.
+            .env("BENEDICT_BIN", env!("CARGO_BIN_EXE_benedict"))
             .env_remove("LIBRARY_DB_URL")
             .env_remove("LIBRARY_DB")
             .env_remove("LIBRARY_ROOM_HOME")
@@ -60,7 +62,7 @@ fn previous_clients_approval_covers_exactly_the_same_wiki_and_skill() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let run = |native: bool, args: &[&str], ok: bool| {
         let mut cmd = if native {
-            Command::new(env!("CARGO_BIN_EXE_doseogwan"))
+            Command::new(env!("CARGO_BIN_EXE_benedict"))
         } else {
             let mut c = Command::new("python3");
             c.arg(repo.join("bin/library.py"));
@@ -69,7 +71,7 @@ fn previous_clients_approval_covers_exactly_the_same_wiki_and_skill() {
         let ret = cmd
             .args(args)
             .current_dir(base)
-            .env("DOSEOGWAN_APP", repo)
+            .env("BENEDICT_APP", repo)
             .env_remove("LIBRARY_CONFIG")
             .env_remove("LIBRARY_DB")
             .env_remove("LIBRARY_DB_URL")

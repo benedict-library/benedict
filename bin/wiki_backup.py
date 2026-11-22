@@ -43,7 +43,7 @@ def markdown(root):
 
 def native_backup(*args):
     """Use the Rust command when installed; source-only hosts retain the original implementation."""
-    binary = shutil.which("doseogwan")
+    binary = shutil.which("benedict")
     if not binary:
         return None
     result = subprocess.run([binary, "backup", *map(str, args)], capture_output=True, text=True, encoding="utf-8")

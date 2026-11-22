@@ -6,7 +6,7 @@ use std::{
 };
 
 fn library(dir: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_doseogwan"))
+    Command::new(env!("CARGO_BIN_EXE_benedict"))
         .args(args)
         .current_dir(dir)
         .env_clear()

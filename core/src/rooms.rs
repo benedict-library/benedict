@@ -107,7 +107,7 @@ impl LiveMemory {
             return Err("room belongs to another project".into());
         }
         match text("op")? {
-            "ping" => Ok(json!({"project":project,"ready":true})),
+            "ping" => Ok(json!({"project":project,"ready":true,"version":env!("CARGO_PKG_VERSION")})),
             "store" => {
                 let (library, room) = (text("library")?, text("room")?);
                 let mut saved = records::persist(

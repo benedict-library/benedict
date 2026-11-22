@@ -209,7 +209,7 @@ fn restore_entry(
         _ => return Err("conflicting installation decision in database".into()),
     };
     let id = record["id"].as_i64().ok_or("missing decision ID")?;
-    let reference = format!("doseogwan recall --library {library} --id {id}");
+    let reference = format!("benedict recall --library {library} --id {id}");
     let title = format!("설치 결정 · {question} ({key})");
     let suffix = format!(
         "_{:.12}.md",

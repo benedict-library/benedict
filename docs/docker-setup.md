@@ -14,10 +14,10 @@ Run `bin/install-project /absolute/workspace` to choose a wiki directory, the ex
 Begin with **“에이전트와 페르소나를 위한 나의 도서관을 만듭니다.”** and **“어떤 자료로 시작할까요?”**. Use the host agent’s clickable question tool, one question at a time. Read its wording and options from the Rust CLI:
 
 ```bash
-doseogwan setup question start --wiki-found
-doseogwan setup question database
-doseogwan setup question memory
-doseogwan setup question shelf
+benedict setup question start --wiki-found
+benedict setup question database
+benedict setup question memory
+benedict setup question shelf
 ```
 
 Use `--wiki-found` only when a candidate wiki has actually been found in the approved scope. This recommends **내 위키 연결하기** first; otherwise the first choice is **예제 자료로 시작하기**. An undiscovered wiki can still be selected by providing its path. The recommendation is a suggestion, never consent.
@@ -31,10 +31,10 @@ Use one installation profile as the authority for the selected project, database
 Use a private settings directory for this installation and one stable project name. Run the interview commands in the same image version used to activate the project. Mount only the settings directory while asking questions. In the shell example below, `bootstrap` runs on the host; the user answers through their agent.
 
 ```bash
-library_settings="${XDG_CONFIG_HOME:-$HOME/.config}/doseogwan/research"
+library_settings="${XDG_CONFIG_HOME:-$HOME/.config}/benedict/research"
 install -d -m 700 "$library_settings"
 project=research
-image="${LIBRARY_IMAGE:-doseogwan-local}"
+image="${LIBRARY_IMAGE:-benedict-local}"
 bootstrap() {
   docker run --rm -i --user "$(id -u):$(id -g)" \
     --volume "$library_settings:/settings" "$image" setup "$@"
@@ -78,7 +78,7 @@ Activation verifies wiki access, shelf readability and database initialization b
 generated indexes persist on the project's data volume. A connected wiki remains on its own host mount. The running room service retains active observations in memory and uses the selected database; the library commands connect over the project volume’s Unix socket.
 
 ## Verify a fresh container
-Activation installs the bundled Benedict library skill in the wiki. Run `doseogwan search benedict-library` or `doseogwan read entities/skill_benedict-library.md` through the assigned library entry point. Each information boundary needs its own registry, volume, and room service. Only attach sources the recipient may read.
+Activation installs the bundled Benedict library skill in the wiki. Run `benedict search benedict-library` or `benedict read entities/skill_benedict-library.md` through the assigned library entry point. Each information boundary needs its own registry, volume, and room service. Only attach sources the recipient may read.
 
 ```bash
 "${library_compose[@]}" run --rm library save "Which dispatch day did we agree on?" \

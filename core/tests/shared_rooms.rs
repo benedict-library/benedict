@@ -11,7 +11,7 @@ struct Rooms {
 }
 impl Rooms {
     fn cmd(&self) -> Command {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_doseogwan"));
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_benedict"));
         cmd.env("LIBRARY_ROOM_SOCKET", self.dir.path().join("room.sock"))
             .env("LIBRARY_DB", self.dir.path().join("rooms.sqlite"))
             .env_remove("LIBRARY_DB_URL")

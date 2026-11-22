@@ -10,13 +10,13 @@ WORKDIR /src/core
 COPY core /src/core
 COPY docs /src/docs
 RUN --mount=type=cache,target=/usr/local/cargo/registry --mount=type=cache,target=/work-target,sharing=locked \
-    touch src/main.rs && cargo build --locked --release --target-dir /work-target && cp /work-target/release/doseogwan /usr/local/bin/
+    touch src/main.rs && cargo build --locked --release --target-dir /work-target && cp /work-target/release/benedict /usr/local/bin/
 
 FROM python:3.11-slim-trixie@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535 AS lexical
-ENV DOSEOGWAN_CLI=/usr/local/bin/doseogwan PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 LIBRARY_CONFIG=/data/library.json LIBRARY_DB=/data/library.sqlite3 PYTHONPATH=/app/runtime
+ENV BENEDICT_CLI=/usr/local/bin/benedict PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 LIBRARY_CONFIG=/data/library.json LIBRARY_DB=/data/library.sqlite3 PYTHONPATH=/app/runtime
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client git acl && rm -r /var/lib/apt/lists/*
-COPY --from=core /usr/local/bin/doseogwan /usr/local/bin/doseogwan
+COPY --from=core /usr/local/bin/benedict /usr/local/bin/benedict
 COPY bin /app/bin
 COPY library_local.py skill_publish.py AGENTS.md /app/
 COPY docs /app/docs
@@ -25,7 +25,7 @@ COPY rooms /app/rooms
 COPY examples /app/examples
 RUN mkdir /data && chown 10001:10001 /data
 USER 10001:10001
-ENTRYPOINT ["doseogwan"]
+ENTRYPOINT ["benedict"]
 CMD ["--help"]
 
 # Vector image: adds the PostgreSQL client module for hybrid (pgvector) search. Building it downloads that package.

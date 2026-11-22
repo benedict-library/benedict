@@ -5,7 +5,7 @@ fn evaluate_offline_scores_readable_sources_and_writes_no_room_evidence() {
     let temp = tempfile::tempdir().unwrap();
     let base = temp.path();
     let cmd = |args: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_doseogwan"))
+        Command::new(env!("CARGO_BIN_EXE_benedict"))
             .current_dir(base)
             .env("LIBRARY_CONFIG", base.join("library.json"))
             .env_remove("LIBRARY_DB_URL")

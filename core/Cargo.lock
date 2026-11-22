@@ -123,8 +123,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "doseogwan"
-version = "0.1.0"
+name = "benedict"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "percent-encoding",

@@ -63,7 +63,7 @@ jobs:
           for crate in courier native plaza; do cargo test --locked --manifest-path "$crate/Cargo.toml"; done
           cargo build --locked --manifest-path core/Cargo.toml
           cargo build --locked --manifest-path courier/Cargo.toml
-          bash courier/tests/handoff.sh "$PWD/core/target/debug/doseogwan" "$PWD/courier/target/debug/courier"
+          bash courier/tests/handoff.sh "$PWD/core/target/debug/benedict" "$PWD/courier/target/debug/courier"
       - name: Test Docker installation and handoff
         if: runner.os == 'Linux' && matrix.python == '3.12'
         run: bash tests/docker-handoff.sh
