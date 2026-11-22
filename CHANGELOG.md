@@ -12,6 +12,15 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   container to start. To upgrade an installed project, delete its `.benedict/library` and run
   `bin/install-project` again with the same workspace.
 
+### Fixed
+
+- The room container now mounts the same wiki and shelf as the library container. Commands sent into it
+  could search the index built at installation but could not open the wiki page or shelf original it
+  returned. New profiles include the mounts. For an installed project, give the room service the library
+  service's mounts in `.benedict/profile.json`
+  (`jq '.services.room.volumes = .services.library.volumes'`), then run `bin/install-project` again with
+  the same workspace so the room container is recreated.
+
 ## [0.2.0] - 2026-11-22
 
 The first versioned public release. Check what is installed with `.benedict/library version`; `room ping` also
