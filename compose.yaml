@@ -23,8 +23,7 @@ services:
     environment:
       LIBRARY_ROOM_SOCKET: /data/rooms.sock
     command: [room, serve]
-    volumes:
-      - library_data:/data
+    volumes: *library-mounts
     healthcheck:
       test: ["CMD", "benedict", "room", "ping"]
       interval: 2s

@@ -220,7 +220,7 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
     }
     let service = json!({"mem_limit":memory, "volumes":mounts, "environment":env});
     let mut profile = json!({"name":project,"services":{"library":service,"librarian":service,
-        "room":{"mem_limit":memory,"environment":env}}});
+        "room":service}});
     if example {
         profile["services"]["library"]["environment"]["LIBRARY_START"] = "example".into();
     }
@@ -416,8 +416,8 @@ mod tests {
         assert_eq!(svc["volumes"][0]["bind"]["create_host_path"], false);
         assert_eq!(svc["environment"]["LIBRARY_PROJECT"], "one");
         assert_eq!(svc, &v["services"]["librarian"]);
-        assert_eq!(svc["environment"], v["services"]["room"]["environment"]);
-        assert_eq!(svc["mem_limit"], v["services"]["room"]["mem_limit"]);
+        // Entry point commands run in the room container, so it opens the same wiki and shelf.
+        assert_eq!(svc, &v["services"]["room"]);
     }
     #[test]
     fn profile_only_references_secret_and_seeds_the_chosen_library() {
