@@ -1,4 +1,4 @@
-mod search;
+mod client;
 use benedict_compat::{python, repo_root};
 use serde_json::Value;
 use std::{
@@ -60,10 +60,6 @@ impl Library {
                 format!("\"{quoted_python}\" \"{runner}\" exec"),
             ),
             ("LIBRARY_REGISTRY_ROOM".into(), "main-search".into()),
-            (
-                "LIBRARY_ROOM_LIB".into(),
-                repo.join("runtime").display().to_string(),
-            ),
             ("LIBRARY_MAIL_FROM".into(), "reader".into()),
             (
                 "PYTHONPATH".into(),

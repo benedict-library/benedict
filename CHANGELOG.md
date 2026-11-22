@@ -11,6 +11,13 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `docker exec` instead of starting a new container for every command. A search no longer waits for a
   container to start. To upgrade an installed project, delete its `.benedict/library` and run
   `bin/install-project` again with the same workspace.
+- Search is one command, `benedict search`. Without `--library` it also returns, under `near`, the top hits of
+  each library the central library `reads`. A library whose prebuilt index is missing, damaged or made for other
+  files is searched in its wiki files directly, and `fallback` says why. `--web` runs the deployment's
+  `LIBRARY_WEB_CMD` with the library key and search terms after the inside results and puts its output under
+  `web`; without it nothing leaves the library. The Python `bin/search.py` and its room code
+  `rooms/room_query.py` are removed, and room-side search (side sections, box libraries, vector hits) is not
+  carried over. `bin/common.py` keeps the settings, room calls and use records the remaining Python tools share.
 
 ### Fixed
 

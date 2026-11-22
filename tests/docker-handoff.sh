@@ -12,7 +12,7 @@ trap cleanup EXIT
 "${compose[@]}" run --rm -T -e LIBRARY_START=example library setup --activate |
   jq -e '.database_ready == true' >/dev/null
 "${compose[@]}" run --rm -T --entrypoint sh library -ec '
-  test -f /app/rooms/room_read.py && test -f /app/rooms/room_query.py
+  test -f /app/rooms/room_read.py && test ! -e /app/rooms/room_query.py
   test -r /shelf/river-field-note.md && test ! -w /shelf/river-field-note.md'
 source=shelf:river-field-note.md
 library read "$source" | jq -e '.text | contains("violet")' >/dev/null

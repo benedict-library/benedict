@@ -526,7 +526,11 @@ class Library:
             except (ValueError, KeyError, TypeError):
                 message = (done.stderr or done.stdout).strip()[:300]
             raise ValueError(message)
-        return json.loads(done.stdout)
+        result = json.loads(done.stdout)
+        if "fallback" in result:
+            # This client searches the prepared index only, as it always did; the Rust CLI may read the files instead.
+            raise ValueError(result["fallback"].split(";")[0])
+        return result
 
     def read(self, path, key=None):
         key, _, root = self.selected(key)

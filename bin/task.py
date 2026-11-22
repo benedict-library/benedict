@@ -24,9 +24,9 @@ import shlex
 import sys
 
 HERE = Path(__file__).resolve().parent
-_spec = importlib.util.spec_from_file_location("_library_search", HERE / "search.py")
-search = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(search)
+_spec = importlib.util.spec_from_file_location("_library_common", HERE / "common.py")
+common = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(common)
 
 CUT = 90  # characters kept from each summary line
 
@@ -186,7 +186,7 @@ def main(argv):
     if args[:1] == ["--room"] and len(args) > 1:
         room = args[1]
         del args[:2]
-    cfg = search.settings()
+    cfg = common.settings()
     room = room or cfg.get("LIBRARY_MAIL_ROOM")
     try:
         if not room:
@@ -196,7 +196,7 @@ def main(argv):
         print(error, file=sys.stderr)
         return 2
     cfg.setdefault("LIBRARY_ROOM_CMD", shlex.join([sys.executable, str(HERE / "room.py"), "exec"]))
-    rc, out, err = search.room_exec(cfg, room, code, 60, 120)
+    rc, out, err = common.room_exec(cfg, room, code, 60, 120)
     sys.stdout.write(out)
     if rc == 0 and out.startswith(("키 없음", "과제 없음")):
         return 1
@@ -206,4 +206,4 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(search.traced("meeting", lambda: main(sys.argv)))
+    sys.exit(common.traced("meeting", lambda: main(sys.argv)))

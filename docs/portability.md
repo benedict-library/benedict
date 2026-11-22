@@ -6,6 +6,10 @@ Docker starts the Rust `benedict` command. Activation creates the registry, wiki
 
 A library can opt into a shelf with its own `shelf_root`. Search indexes its Markdown and text originals. Use `read shelf:relative/path` to open the original and obtain its SHA-256 digest. Reindex after changing an original. Keep separate registries and volumes for libraries whose contents or names must remain private.
 
+When a library's prebuilt index is missing, damaged or made for other files, `benedict search` reads that
+library's documents directly, ranks them the same way and says why under `fallback` (`indexed_at` is then null).
+The Python compatibility client below still refuses such a search.
+
 ## Python compatibility and local file/index mode
 
 `bin/library.py` reads an explicit JSON registry (default `./library.json`) and selected Markdown root. It does not
@@ -44,13 +48,9 @@ later runs send only changed and deleted documents, `--full` sends everything, a
 room that no longer holds what the state says (restart, tokenizer change) is refilled in full by the next run. Saves
 with `LIBRARY_ROOM_HOME` set update the rooms at once this way.
 
-A whole-library search (`bin/search.py` without `--library`) adds side sections, each a registry choice under
-`sections` (a section not chosen prints `(설정 안 됨)`, a failing one prints why): `today` lists pages in `dirs`
-(relative to the wiki root, or absolute) whose names start with today's date and hold a question word; `meeting_vars`
-lists meeting-room variables sharing question words (`room` defaults to this library's meeting room); `decisions` runs
-`sql` (with `%(vec)s` for the question vector and `%(k)s`) on `LIBRARY_PG_DSN` and prints one line per row. Each may set
-its `title`. `terms` names a JSON file of glossary entries (`표준어`, `별칭`, optional `약어`, `절`, `실체`) copied into the
-search room as `library_terms`; without it the room keeps whatever another librarian uploaded.
+The room sync still checks and copies two older room-search choices for a deployment's own room client: `sections`
+(`today`, `meeting_vars`, `decisions`) and `terms`, a JSON file copied into the search room as `library_terms`.
+`benedict search` does not print them.
 
 `bin/librarian.py --clean` tidies room variables by the registry's `clean` choice (`true` for the bundled rules, or
 per-room rules: `keep`, `prefixes`, `expire_days`, `expire_prefixes`, `shells`, `unknown: report`): expired working
@@ -98,22 +98,23 @@ On Windows, keep the legacy room-state directory under a private user profile pr
 
 The legacy reading client accepts explicit `--attach` to bring a local document into a room. Every recipient with access to that room may read the attached contents, including after snapshot restoration.
 
-Existing `bin/search.py`, `bin/read.py`, `bin/save_query.py` remain separate entry points. The room clients read
+Search is `benedict search`; `bin/read.py` and `bin/save_query.py` remain separate entry points. The room clients read
 `LIBRARY_*` from the environment or a selected `LIBRARY_SEARCH_ENV` file; save uses `DATABASE_URL` and `psql`.
 Do not copy deployment values into this repository.
 
 - Room transport: `LIBRARY_ROOM_CMD`, optional `LIBRARY_ROOM_EXEC`; registry room: `LIBRARY_REGISTRY_ROOM`.
-- Bundled modules: set `LIBRARY_ROOM_LIB` to the checkout's `runtime` directory.
-- Wiki/box transports: `LIBRARY_WIKI_EXEC`, `LIBRARY_BOX_EXEC`, `LIBRARY_BOX_CMD` when explicitly used.
 - Optional vector mode: `runtime/wiki_embed_client.py` (settings `LIBRARY_EMBED_URL` — `http://…` or `unix:///…`,
   `LIBRARY_EMBED_MODEL`, `LIBRARY_EMBED_DIM`, `LIBRARY_EMBED_PROMPTS`, `LIBRARY_EMBED_FALLBACK`), `psycopg2` in the
   image built with `--target vector`, a compatible vector table, and the database address in the room's
-  `LIBRARY_PG_DSN` (or room `ROOM_PG_DSN`, or `LIBRARY_ROOM_DSN_FILE`). Unset means lexical mode, shown in results.
+  `LIBRARY_PG_DSN` (or room `ROOM_PG_DSN`). Unset means lexical mode, shown in results.
 - A container with no network can still reach exactly two services through Unix sockets that a separate gateway
   (`bin/gate.py --route <socket>=<host>:<port>`, standard library) publishes in a shared folder: the database socket `.s.PGSQL.5432` (DSN `…@/db?host=<folder>`) and the
   embedding server (`LIBRARY_EMBED_URL=unix://<folder>/embed.sock`).
-- Existing optional memory/source/trace settings retain their deployment behavior; local CLI does not load them.
-- Web search: `bin/search.py --web` runs `LIBRARY_WEB_CMD` (key and question appended) through `LIBRARY_WEB_EXEC`, normally
+- The optional trace settings (`LIBRARY_TRACE_*`, read by `bin/common.py`) keep their deployment behavior; the Rust CLI
+  does not load them.
+- Web search: `benedict search --web` runs `LIBRARY_WEB_CMD` after the inside results and puts its exit code and output
+  under `web`. The setting is a shell command line; the library key and the search terms are its last two arguments,
+  and nothing else is sent. `LIBRARY_WEB_TIMEOUT` (seconds, default 540) bounds it. It normally runs
   `bin/web.py` on the machine holding the shelf. There, `LIBRARY_WEB_SEARCH_CMD` is the means: it gets the question as its
   last argument and prints `{"summary": text, "sources": [{"url": ..., "note": ...}]}`. Which means runs is a deployment
   choice; a means that costs money is the deployment's decision. A library takes part only with a `web_shelf` in its
@@ -122,7 +123,7 @@ Do not copy deployment values into this repository.
   on top of the built-in ones and `save_block`. The refusal rules catch shapes, not meaning: a question that describes
   private matters in plain words passes them, so the asker still decides what is public.
   Production HTTP(S) connects directly to a validated numeric public address at each hop; TLS verifies the original host name. Environment proxy settings do not apply to this fetcher.
-  HTML gets a text copy beside the original; other binary types such as PDF are kept without text. The local CLI has no web step.
+  HTML gets a text copy beside the original; other binary types such as PDF are kept without text. Without `LIBRARY_WEB_CMD`, `--web` sends nothing, exits 1 and names `web-source` for a source the agent found itself.
 
 ## Additional required responsibilities
 
