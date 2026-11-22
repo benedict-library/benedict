@@ -529,7 +529,7 @@ class Library:
         result = json.loads(done.stdout)
         if "fallback" in result:
             # This client searches the prepared index only, as it always did; the Rust CLI may read the files instead.
-            raise ValueError(result["fallback"].split(";")[0])
+            raise ValueError(result["fallback"].removesuffix("; searched the wiki files directly"))
         return result
 
     def read(self, path, key=None):
