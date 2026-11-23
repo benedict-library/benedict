@@ -64,7 +64,7 @@ bin/install-project "$workspace" "$library_settings/compose.json"
 bin/verify-wiki-access "$library_settings/compose.json" "$library_settings/receipts.json" || exit 1
 ```
 
-**예제 자료로 시작하기** seeds the bundled example. For **내 위키 연결하기**, show the resolved host path and supply `--wiki "/absolute/path/to/wiki"`. A selected shelf folder requires `--shelf "/absolute/path/to/shelf"` and is mounted read-only.
+**예제 자료로 시작하기** seeds the bundled example and its example shelf; it may skip the remaining questions (SQLite, 512MiB). Any other start must answer the database, memory and shelf questions: setup stops at the first missing answer and prints that question for the agent to ask. For **내 위키 연결하기**, show the resolved host path and supply `--wiki "/absolute/path/to/wiki"`. **내 원본 폴더 연결하기** requires `--shelf "/absolute/path/to/shelf"` and is mounted read-only. **서가 없이 시작하기** (`--shelf none`) mounts an empty read-only volume; your own library never receives the example shelf. `bin/install-project` accepts the same `--database`, `--database-secret-file`, `--memory` and `--shelf` answers.
 Resolve both paths on the Docker host before generating the profile. Docker rejects missing directories.
 The generated profile contains the mount settings and the project name. Running setup again with the
 same options reuses the profile. To change a setting such as the memory limit, generate a second profile

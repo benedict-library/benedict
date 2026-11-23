@@ -2,16 +2,38 @@
 # Activate an isolated library and register its entry point in the adopter's workspace.
 set -euo pipefail
 source_args=()
-case ${1:-} in
-  --start)
-    [[ ${2:-} == example || ${2:-} == empty ]] || { echo 'expected --start example or empty' >&2; exit 2; }
-    source_args=(--start "$2"); shift 2 ;;
-  --wiki)
-    [[ -n ${2:-} && -d $2 ]] || { echo 'select an existing wiki directory' >&2; exit 2; }
-    source_args=(--wiki "$(cd -- "$2" && pwd -P)"); shift 2 ;;
-esac
+answer_args=()
+# Each answer to a setup question travels to setup unchanged; setup asks the next missing question.
+while [[ ${1:-} == --* ]]; do
+  [[ -n ${2:-} ]] || { echo "$1 needs a value" >&2; exit 2; }
+  case $1 in
+    --start)
+      [[ $2 == example || $2 == empty ]] || { echo 'expected --start example or empty' >&2; exit 2; }
+      source_args+=(--start "$2") ;;
+    --wiki)
+      [[ -d $2 ]] || { echo 'select an existing wiki directory' >&2; exit 2; }
+      source_args+=(--wiki "$(cd -- "$2" && pwd -P)") ;;
+    --database)
+      [[ $2 == sqlite || $2 == postgres ]] || { echo 'expected --database sqlite or postgres' >&2; exit 2; }
+      answer_args+=(--database "$2") ;;
+    --database-secret-file)
+      [[ -f $2 ]] || { echo 'select an existing database secret file' >&2; exit 2; }
+      answer_args+=(--database-secret-file "$(cd -- "$(dirname -- "$2")" && pwd -P)/$(basename -- "$2")") ;;
+    --memory)
+      answer_args+=(--memory "$2") ;;
+    --shelf)
+      if [[ $2 == none ]]; then
+        answer_args+=(--shelf none)
+      else
+        [[ -d $2 ]] || { echo 'select an existing shelf folder, or --shelf none' >&2; exit 2; }
+        answer_args+=(--shelf "$(cd -- "$2" && pwd -P)")
+      fi ;;
+    *) echo "unknown option $1" >&2; exit 2 ;;
+  esac
+  shift 2
+done
 if (( $# < 1 || $# > 2 )); then
-  echo 'usage: bin/install-project [--start example|empty | --wiki DIR] EXISTING_WORKSPACE [CONFIRMED_COMPOSE_PROFILE.json]' >&2
+  echo 'usage: bin/install-project [--start example|empty | --wiki DIR] [--database sqlite|postgres] [--database-secret-file FILE] [--memory SIZE] [--shelf DIR|none] EXISTING_WORKSPACE [CONFIRMED_COMPOSE_PROFILE.json]' >&2
   exit 2
 fi
 repo=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
@@ -34,7 +56,7 @@ else
     project=benedict-$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')
   fi
 fi
-if [[ -f $profile && ${#source_args[@]} -ne 0 ]]; then
+if [[ -f $profile ]] && (( ${#source_args[@]} + ${#answer_args[@]} )); then
   echo 'This project already has a profile. Use that profile or choose a new workspace.' >&2
   exit 2
 fi
@@ -99,7 +121,7 @@ elif [[ -f $state/library ]] && ! cmp -s "$stage/library" "$state/library"; then
 fi
 docker build --quiet --tag "$image" "$repo"
 if (( $# == 1 )) && [[ ! -e $profile ]]; then
-  docker run --rm --user "$(id -u):$(id -g)" -v "$stage:/settings" "$image" setup --project "$project" "${source_args[@]}" --output /settings/profile.json
+  docker run --rm --user "$(id -u):$(id -g)" -v "$stage:/settings" "$image" setup --project "$project" "${source_args[@]}" "${answer_args[@]}" --output /settings/profile.json
   mv -- "$stage/profile.json" "$profile"
 fi
 export LIBRARY_IMAGE="$image"
