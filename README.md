@@ -51,7 +51,7 @@ Keep this folder after installing: your project opens its library with the setti
 bin/install-project --start example ~/projects/notes
 ```
 
-Replace `~/projects/notes` with your project folder (create it first if it does not exist). To start from your own wiki, use `--wiki WIKI_FOLDER` instead of `--start example`.
+Replace `~/projects/notes` with your project folder (create it first if it does not exist). The example brings its own example shelf. To start from your own wiki, answer every setup question instead of `--start example`: `--wiki WIKI_FOLDER --database sqlite --memory 512m --shelf ORIGINALS_FOLDER` (or `--shelf none` to start with an empty shelf). A missing answer stops the installation and prints the question to ask.
 
 **3. Check the connection.**
 

@@ -14,6 +14,13 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Installing your own wiki or an empty library now requires every setup answer. Setup used to finish
+  without the database, memory and shelf answers and then mounted the bundled example shelf into a library
+  built from your own material. It now stops at the first missing answer and prints that question. The
+  shelf question recommends connecting your originals folder or starting with no shelf (`--shelf none`,
+  an empty read-only volume); the example shelf comes only with the example start, which keeps its
+  one-line installation. `bin/install-project` passes `--database`, `--database-secret-file`, `--memory`
+  and `--shelf` to setup.
 - The room container now mounts the same wiki and shelf as the library container. Commands sent into it
   could search the index built at installation but could not open the wiki page or shelf original it
   returned. New profiles include the mounts. For an installed project, give the room service the library

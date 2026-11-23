@@ -5,6 +5,9 @@ use std::fs;
 
 use std::path::{Component, Path};
 
+/// The memory answer "default" in the setup questions (wizard: 512MiB로 시작하기).
+const DEFAULT_MEMORY: &str = "512m";
+
 fn options(args: &[String]) -> Result<BTreeMap<&str, &str>, String> {
     let mut values = BTreeMap::new();
     for pair in args.chunks(2) {
@@ -124,16 +127,28 @@ fn apply_answers(
     match selected("memory")? {
         "default"
             if memory_bytes(opts.get("--memory").copied().unwrap_or("512m"))?
-                == memory_bytes("512m")? =>
+                == memory_bytes(DEFAULT_MEMORY)? =>
         {
-            ()
+            opts.insert("--memory", DEFAULT_MEMORY);
         }
         "other" => require(opts.contains_key("--memory"), "--memory", "memory")?,
         _ => return Err(conflict("memory")),
     }
-    match selected("shelf")? {
-        "default" if !opts.contains_key("--shelf") => (),
-        "folder" | "other" => require(opts.contains_key("--shelf"), "--shelf", "shelf")?,
+    // The bundled example shelf belongs to the example start; own material connects a folder or starts with no shelf.
+    let example = opts.get("--start") == Some(&"example");
+    let shelf = opts.get("--shelf").copied();
+    match (answers.get("shelf").map(String::as_str), shelf) {
+        (None, _) if example => (),
+        (None, _) => return Err(selected("shelf").unwrap_err()),
+        (Some("default"), None) if example => (),
+        (Some("default"), _) if !example => {
+            return Err("the bundled shelf comes only with the example start; connect a folder or choose none".into())
+        }
+        (Some("none"), None | Some("none")) => {
+            opts.insert("--shelf", "none");
+        }
+        (Some("folder" | "other"), Some(s)) if s != "none" => (),
+        (Some("folder" | "other"), _) => require(false, "--shelf", "shelf")?,
         _ => return Err(conflict("shelf")),
     }
     Ok(())
@@ -159,6 +174,24 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
         let choices = crate::install_journal::selections(Path::new(path), project)?;
         apply_answers(&mut opts, &choices)?;
     }
+    let own = opts.contains_key("--wiki");
+    let example = match opts.get("--start").copied() {
+        None if own => false,
+        None => return Err(crate::wizard::prompt("start", false)?.to_string()),
+        Some("empty") if !own => false,
+        Some("empty") => return Err("choose the empty library or an existing wiki".into()),
+        Some("example") if !own => true,
+        Some("example") => return Err("choose the example or an existing wiki".into()),
+        _ => return Err("--start must be empty or example".into()),
+    };
+    // Only the example keeps its one-line start; any other library asks every remaining question in order.
+    if !example {
+        for (option, step) in [("--database", "database"), ("--memory", "memory"), ("--shelf", "shelf")] {
+            if !opts.contains_key(option) {
+                return Err(crate::wizard::prompt(step, own)?.to_string());
+            }
+        }
+    }
     let output = opts
         .get("--output")
         .ok_or("missing --output FILE")?
@@ -182,7 +215,12 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
         _ => return Err("--database must be sqlite or postgres".into()),
     }
     let wiki = opts.get("--wiki").map(|s| host_path(s)).transpose()?;
-    let shelf = opts.get("--shelf").map(|s| host_path(s)).transpose()?;
+    let empty_shelf = opts.get("--shelf") == Some(&"none");
+    let shelf = opts
+        .get("--shelf")
+        .filter(|s| **s != "none")
+        .map(|s| host_path(s))
+        .transpose()?;
     if let (Some(w), Some(s)) = (wiki, shelf) {
         if w.starts_with(s) || s.starts_with(w) {
             return Err("the writable wiki and read-only shelf paths must not overlap".into());
@@ -197,15 +235,6 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
             return Err("keep the database secret outside wiki and shelf storage".into());
         }
     }
-    let example = match opts.get("--start").copied() {
-        None if wiki.is_some() => false,
-        None => return Err(crate::wizard::prompt("start", false)?.to_string()),
-        Some("empty") if wiki.is_none() => false,
-        Some("empty") => return Err("choose the empty library or an existing wiki".into()),
-        Some("example") if wiki.is_none() => true,
-        Some("example") => return Err("choose the example or an existing wiki".into()),
-        _ => return Err("--start must be empty or example".into()),
-    };
     let mut mounts = vec![];
     for (source, target, read_only) in [(wiki, "/data/wiki", false), (shelf, "/shelf", true)] {
         if let Some(host) = source {
@@ -215,6 +244,11 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
             );
         }
     }
+    if empty_shelf {
+        // An empty named volume replaces the bundled example shelf; nocopy keeps image files out of it.
+        mounts.push(json!({"type":"volume","source":"empty_shelf","target":"/shelf",
+            "read_only":true,"volume":{"nocopy":true}}));
+    }
     if wiki.is_some() {
         env["LIBRARY_WIKI_USER"] = json!(rustix::process::geteuid().as_raw().to_string());
     }
@@ -223,6 +257,9 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
         "room":service}});
     if example {
         profile["services"]["library"]["environment"]["LIBRARY_START"] = "example".into();
+    }
+    if empty_shelf {
+        profile["volumes"] = json!({"empty_shelf":{}});
     }
     if let Some(file) = secret_file {
         profile["secrets"] =
@@ -407,6 +444,8 @@ mod tests {
             "/tmp/a $b",
             "--shelf",
             "/tmp/b",
+            "--memory",
+            "512m",
         ]))
         .unwrap();
         let svc = &v["services"]["library"];
@@ -520,13 +559,105 @@ mod tests {
         let mut opts = args(&["--project", "a", "--output", path.to_str().unwrap()]);
         assert!(run(&opts).unwrap_err().contains("어떤 자료로 시작할까요?"));
         assert!(!path.exists());
-        opts.extend(args(&["--start", "empty"]));
+        opts.extend(args(&["--start", "empty", "--database", "sqlite", "--memory", "512m", "--shelf", "none"]));
         run(&opts).unwrap();
         let first = fs::read(&path).unwrap();
         run(&opts).unwrap();
         opts.extend(args(&["--wiki", "/var/wikis/a"]));
         assert!(run(&opts).is_err());
         assert_eq!(fs::read(path).unwrap(), first);
+    }
+    fn base(extra: &[&str]) -> Vec<String> {
+        let mut all = args(&["--project", "a", "--output", "x"]);
+        all.extend(args(extra));
+        all
+    }
+    fn shelf_mount(profile: &Value, service: &str) -> Option<Value> {
+        profile["services"][service]["volumes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["target"] == "/shelf")
+            .cloned()
+    }
+    #[test]
+    fn own_material_install_asks_every_remaining_question_in_order() {
+        let wiki = ["--wiki", "/srv/wiki"];
+        let cases: Vec<(&[&str], &str)> = vec![
+            (&[], "각 실의 기록을 어디에 저장할까요?"),
+            (&["--database", "sqlite"], "컨테이너 하나가 쓸 메모리 상한을 어떻게 정할까요?"),
+            (&["--database", "sqlite", "--memory", "512m"], "서가 원본은 어디에서 읽을까요?"),
+            (&["--memory", "512m", "--shelf", "none"], "각 실의 기록을 어디에 저장할까요?"),
+        ];
+        for (given, question) in cases {
+            let mut all = wiki.to_vec();
+            all.extend_from_slice(given);
+            let error = overlay(&base(&all)).unwrap_err();
+            assert!(error.contains(question), "{given:?}: {error}");
+        }
+        let empty = overlay(&base(&["--start", "empty", "--database", "sqlite", "--memory", "512m"])).unwrap_err();
+        assert!(empty.contains("서가 원본은 어디에서 읽을까요?"), "{empty}");
+    }
+    #[test]
+    fn own_material_never_receives_the_example_shelf() {
+        let answered = ["--wiki", "/srv/wiki", "--database", "sqlite", "--memory", "512m"];
+        let mut folder = answered.to_vec();
+        folder.extend(["--shelf", "/srv/originals"]);
+        let (_, v) = overlay(&base(&folder)).unwrap();
+        for service in ["library", "librarian", "room"] {
+            let mount = shelf_mount(&v, service).expect("shelf mount");
+            assert_eq!(mount["source"], "/srv/originals");
+            assert_eq!(mount["read_only"], true);
+        }
+        let mut none = answered.to_vec();
+        none.extend(["--shelf", "none"]);
+        let (_, v) = overlay(&base(&none)).unwrap();
+        for service in ["library", "librarian", "room"] {
+            let mount = shelf_mount(&v, service).expect("empty shelf mount");
+            assert_eq!(mount["type"], "volume");
+            assert_eq!(mount["source"], "empty_shelf");
+            assert_eq!(mount["read_only"], true);
+            assert_eq!(mount["volume"]["nocopy"], true);
+        }
+        assert!(v["volumes"].get("empty_shelf").is_some());
+        let mut both = none.clone();
+        both.extend(["--start", "example"]);
+        assert!(overlay(&base(&both)).is_err());
+    }
+    #[test]
+    fn the_example_keeps_its_one_line_start_and_its_own_shelf() {
+        let (_, v) = overlay(&base(&["--start", "example"])).unwrap();
+        assert_eq!(v["services"]["library"]["environment"]["LIBRARY_START"], "example");
+        assert!(shelf_mount(&v, "room").is_none(), "the bundled shelf comes from compose");
+        let (_, v) = overlay(&base(&["--start", "example", "--shelf", "/srv/originals"])).unwrap();
+        assert_eq!(shelf_mount(&v, "room").unwrap()["source"], "/srv/originals");
+    }
+    #[test]
+    fn recorded_shelf_answers_follow_the_start_choice() {
+        let answers = |start: &str, shelf: Option<&str>| -> BTreeMap<String, String> {
+            let mut a: BTreeMap<String, String> = [("start", start), ("database", "sqlite"), ("memory", "default")]
+                .into_iter()
+                .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                .collect();
+            if let Some(s) = shelf {
+                a.insert("shelf".into(), s.into());
+            }
+            a
+        };
+        let wiki = || BTreeMap::from([("--wiki", "/srv/wiki")]);
+        let error = apply_answers(&mut wiki(), &answers("wiki", Some("default"))).unwrap_err();
+        assert!(error.contains("example"), "{error}");
+        assert!(apply_answers(&mut wiki(), &answers("wiki", None)).is_err());
+        let mut none = wiki();
+        apply_answers(&mut none, &answers("wiki", Some("none"))).unwrap();
+        assert_eq!(none["--shelf"], "none");
+        assert_eq!(none["--memory"], "512m");
+        let mut conflict = BTreeMap::from([("--wiki", "/srv/wiki"), ("--shelf", "/srv/x")]);
+        assert!(apply_answers(&mut conflict, &answers("wiki", Some("none"))).is_err());
+        let mut example = BTreeMap::new();
+        apply_answers(&mut example, &answers("example", None)).unwrap();
+        assert!(!example.contains_key("--shelf"));
+        apply_answers(&mut BTreeMap::new(), &answers("example", Some("default"))).unwrap();
     }
     #[test]
     fn rejects_overlap_duplicates_and_invalid_values() {
