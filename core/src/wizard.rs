@@ -48,18 +48,19 @@ pub fn prompt(step: &str, wiki_found: bool) -> Result<Value, String> {
                 "현재 기본값입니다. 사용량을 확인한 뒤 조정할 수 있습니다.",
             )],
         ),
+        // Asked only for your own material: the example start brings its own example shelf.
         "shelf" => (
             "서가 원본은 어디에서 읽을까요?",
             vec![
                 choice(
-                    "default",
-                    "기본 서가 사용하기",
-                    "별도의 원본 폴더를 연결하지 않고 시작합니다.",
-                ),
-                choice(
                     "folder",
                     "내 원본 폴더 연결하기",
-                    "선택한 폴더를 읽기 전용으로 연결합니다.",
+                    "위키가 근거로 삼는 원본 폴더를 읽기 전용으로 연결합니다.",
+                ),
+                choice(
+                    "none",
+                    "서가 없이 시작하기",
+                    "빈 서가로 시작합니다. 예제 서가는 붙지 않습니다.",
                 ),
             ],
         ),
@@ -107,6 +108,10 @@ mod tests {
                 );
                 if step == "start" {
                     assert_eq!(choices[0]["id"], if found { "wiki" } else { "example" });
+                }
+                if step == "shelf" {
+                    assert_eq!(choices[0]["id"], "folder");
+                    assert!(choices.iter().all(|c| c["id"] != "default"));
                 }
             }
         }
