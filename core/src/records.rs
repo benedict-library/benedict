@@ -98,6 +98,10 @@ pub(crate) fn sqlite(path: &std::path::Path, create: bool) -> Result<Connection,
     db.busy_timeout(Duration::from_secs(10))
         .map_err(|e| e.to_string())?;
     if create {
+        // In WAL mode readers do not block writers. The librarian and the room read for seconds
+        // on a large library (counting words, loading an index); a write meanwhile must not wait.
+        db.pragma_update(None, "journal_mode", "WAL")
+            .map_err(|e| format!("open evidence database: {e}"))?;
         let named = |table: &str| {
             db.query_row(
                 "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",

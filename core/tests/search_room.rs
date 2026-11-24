@@ -218,6 +218,35 @@ fn an_index_with_nothing_changed_does_not_wait_for_the_database() {
 }
 
 #[test]
+fn a_long_read_does_not_block_a_write() {
+    // The librarian counts words and the room loads an index in long reads (about ten seconds each
+    // on 31,000 pages). A write meanwhile, such as the room recording a search, must not wait for them.
+    let library = Library::fixture();
+    library.ok(&["index"]);
+    let reader = library.database();
+    reader.execute_batch("BEGIN").unwrap();
+    let _: i64 = reader.query_row("SELECT count(*) FROM benedict_terms", [], |r| r.get(0)).unwrap();
+    fs::write(library.path().join("wiki/entities/policy-00.md"), "# Zebra\n\nzebra\n").unwrap();
+    let mut child = library.cmd().arg("index").stdout(Stdio::piped()).spawn().unwrap();
+    let until = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break Some(status);
+        }
+        if Instant::now() > until {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    reader.execute_batch("COMMIT").unwrap();
+    assert!(status.expect("the write waited for the reader").success());
+    let out: Value = serde_json::from_reader(child.stdout.take().unwrap()).unwrap();
+    assert_eq!(out["changed"], 1);
+}
+
+#[test]
 fn many_changed_pages_are_written_while_they_are_read() {
     // Past the number of changed pages kept in memory, the index writes pages as it reads them.
     let library = Library::new();
