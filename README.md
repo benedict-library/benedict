@@ -22,7 +22,7 @@ Benedict takes its name from Benedict of Nursia. His Rule set aside time for rea
 
 ![Library structure. Four rooms use shelf originals and record work in memory and a database. The librarian curates the wiki. The courier carries external tasks and returns their results.](docs/architecture.en.svg)
 
-Shelf originals are mounted read-only. Each room records work in memory and the database. The librarian files curated knowledge in the wiki. In any of the four rooms, an agent can **dispatch external work** (`room dispatch`). Once the host runs the assigned work through the courier, the next session can **read the reply** (`room responses`) using the request ID in the same library. [Courier guide](docs/courier.md)
+Shelf originals are mounted read-only. Each room writes its conversation to a dated transcript on the shelf and keeps it in memory; agents save finished work to the database. The librarian files curated knowledge in the wiki. In any of the four rooms, an agent can **dispatch external work** (`room dispatch`). Once the host runs the assigned work through the courier, the next session can **read the reply** (`room responses`) using the request ID in the same library. [Courier guide](docs/courier.md)
 
 ## How agents work here
 

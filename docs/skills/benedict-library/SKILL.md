@@ -17,8 +17,11 @@ Run the following commands through the installation's library entry point.
 2. Work alone in the reading room. For a joint decision use `benedict room task`
    with the question and source. Give collaborators in this library the task ID.
    Use `benedict room --help` for opening and replying to a task.
-3. Record the decision, the reason and anything still open:
-   `benedict save --refs "original path or identifier" "question" "decision, reason and open work"`.
+   Keep the conversation as it happens: `benedict room append --room reading --session ID --request ID --role user|agent|tool --text TEXT`.
+   Each event goes to the day's transcript on the shelf first, then to the room's memory; the reply names its file and line.
+3. When the work is done, save one record of the decision, the reason and anything still open:
+   `benedict save --session ID --turns DAY/LIBRARY-ROOM.jsonl:FIRST-LAST --refs "original path or identifier" "question" "decision, reason and open work"`.
+   `save` keeps the record in the database only. The librarian chooses what reaches the wiki with `benedict file --id RECORD_ID`.
    Use `benedict librarian --help` when the task calls for indexing or filing.
 4. Cite only evidence the recipient may access. If sources are missing, state what
    is unknown. Keep search terms, filenames, citations and replies within the

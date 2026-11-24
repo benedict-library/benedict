@@ -22,6 +22,7 @@ fn options(args: &[String]) -> Result<BTreeMap<&str, &str>, String> {
                 | "--wiki"
                 | "--shelf"
                 | "--autostart"
+                | "--transcript-days"
                 | "--output"
                 | "--answers"
         ) || pair.len() != 2
@@ -222,7 +223,11 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
         "off" => "no",
         _ => return Err("--autostart must be on or off".into()),
     };
-    let mut env = json!({"LIBRARY_PROJECT":project, "LIBRARY_DB":"/data/library.sqlite3", "LIBRARY_CONFIG":"/data/library.json", "LIBRARY_ROOM_SOCKET":"/data/rooms.sock"});
+    let transcripts = opts.get("--transcript-days").copied().unwrap_or("keep");
+    if transcripts != "keep" && !transcripts.parse::<u64>().is_ok_and(|d| d > 0) {
+        return Err("--transcript-days must be keep or a number of days".into());
+    }
+    let mut env = json!({"LIBRARY_PROJECT":project, "LIBRARY_DB":"/data/library.sqlite3", "LIBRARY_CONFIG":"/data/library.json", "LIBRARY_ROOM_SOCKET":"/data/rooms.sock", "LIBRARY_TRANSCRIPT_DAYS":transcripts});
     let secret_file = opts
         .get("--database-secret-file")
         .map(|s| host_path(s))
@@ -282,6 +287,9 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
         "room":service}});
     if example {
         profile["services"]["library"]["environment"]["LIBRARY_START"] = "example".into();
+    } else {
+        // The bundled golden questions fit only the example; other libraries grow their own.
+        profile["services"]["librarian"]["environment"]["LIBRARY_GOLDEN"] = "".into();
     }
     // Only the long-running services restart; the library service runs one command and exits.
     for svc in ["room", "librarian"] {
@@ -556,6 +564,11 @@ mod tests {
             let mut same = v["services"][other].clone();
             let restart = same.as_object_mut().unwrap().remove("restart");
             assert_eq!(restart, Some(json!("unless-stopped")));
+            if other == "librarian" {
+                // Only the example start uses the bundled golden questions.
+                let golden = same["environment"].as_object_mut().unwrap().remove("LIBRARY_GOLDEN");
+                assert_eq!(golden, Some(json!("")));
+            }
             assert_eq!(svc, &same);
         }
     }

@@ -36,11 +36,13 @@ services:
     <<: *runtime
     environment:
       LIBRARY_ROOM_SOCKET: /data/rooms.sock
+      # Installed libraries clear this and use /data/golden/<library>.jsonl when it exists.
+      LIBRARY_GOLDEN: /app/examples/golden.jsonl
     depends_on:
       room:
         condition: service_healthy
     restart: ${LIBRARY_RESTART:-unless-stopped}
-    command: [librarian, --config, /data/library.json, --golden, /app/examples/golden.jsonl, --iterations, "365", --interval, "86400"]
+    command: [librarian, --config, /data/library.json, --iterations, "365", --interval, "86400"]
     volumes: *library-mounts
 volumes:
   library_data:
