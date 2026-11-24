@@ -27,7 +27,7 @@ const FALLBACK_BUDGET: usize = 256 * 1024 * 1024;
 // A single event larger than this keeps an excerpt and its transcript line.
 const EXCERPT_BYTES: usize = 4096;
 const REQUEST_LIMIT: u64 = 32 * 1024 * 1024;
-const NOT_RUNNING: &str = "room service not running";
+pub(crate) const NOT_RUNNING: &str = "room service not running";
 const TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) fn socket_path() -> Option<PathBuf> {
     env::var_os("LIBRARY_ROOM_SOCKET").map(PathBuf::from)
@@ -131,6 +131,7 @@ struct LiveMemory {
     bytes: usize,
     budget: usize,
     files: HashMap<String, DayFile>,
+    search: crate::search_room::SearchRoom,
 }
 
 impl LiveMemory {
@@ -140,6 +141,7 @@ impl LiveMemory {
             bytes: 0,
             budget: budget(),
             files: HashMap::new(),
+            search: Default::default(),
         }
     }
 
@@ -329,6 +331,18 @@ impl LiveMemory {
                 self.remember(library, room, &event)?;
                 Ok(saved)
             }
+            "search" => {
+                let top = msg["top"]
+                    .as_u64()
+                    .filter(|n| (1..=100).contains(n))
+                    .ok_or("top must be between 1 and 100")?;
+                self.search.search(
+                    Path::new(text("config")?),
+                    text("library")?,
+                    text("query")?,
+                    top as usize,
+                )
+            }
             "memory" => Ok(
                 json!({"project":project,"library":text("library")?,"room":text("room")?,
                                 "records":self.list(text("library")?,text("room")?)?}),
@@ -367,6 +381,10 @@ fn serve(path: &Path) -> Result<()> {
     let listener = UnixListener::bind(path).map_err(err)?;
     fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(err)?;
     let mut memory = LiveMemory::new();
+    // The search room loads each library's index in the background as the service starts.
+    if let Some(config) = env::var_os("LIBRARY_CONFIG") {
+        memory.search.preload(Path::new(&config));
+    }
     for client in listener.incoming() {
         let mut stream = client.map_err(err)?;
         stream.set_read_timeout(Some(TIMEOUT)).map_err(err)?;
