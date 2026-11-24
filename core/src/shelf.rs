@@ -100,6 +100,42 @@ pub fn convert(bytes: &[u8], name: &str, pages: &str) -> Result<Option<String>> 
         .map_err(|_| "kordoc produced no text".into())
 }
 
+/// Compose Hangul jamo into syllables (the Hangul part of Unicode NFC). macOS and
+/// some network stores keep Korean filenames decomposed; the index and the reader
+/// use the composed form so the same name finds the same original.
+pub fn compose_hangul(s: &str) -> String {
+    const S: u32 = 0xAC00;
+    let mut out: Vec<char> = Vec::with_capacity(s.len());
+    for c in s.chars() {
+        let u = c as u32;
+        if let Some(last) = out.last_mut() {
+            let l = *last as u32;
+            if (0x1100..0x1113).contains(&l) && (0x1161..0x1176).contains(&u) {
+                *last = char::from_u32(S + ((l - 0x1100) * 21 + (u - 0x1161)) * 28).unwrap();
+                continue;
+            }
+            if (S..S + 11172).contains(&l)
+                && (l - S).is_multiple_of(28)
+                && (0x11A8..0x11C3).contains(&u)
+            {
+                *last = char::from_u32(l + (u - 0x11A7)).unwrap();
+                continue;
+            }
+        }
+        out.push(c);
+    }
+    out.into_iter().collect()
+}
+
+/// The entry of `dir` whose composed name equals `part`, for a name stored decomposed.
+fn composed_entry(dir: &File, part: &std::ffi::OsStr) -> Option<std::ffi::OsString> {
+    let wanted = compose_hangul(part.to_str()?);
+    Dir::read_from(dir).ok()?.flatten().find_map(|entry| {
+        let name = entry.file_name().to_str().ok()?.to_owned();
+        (name != wanted && compose_hangul(&name) == wanted).then(|| name.into())
+    })
+}
+
 fn locate(root: &Path, name: &str) -> Result<File> {
     let mut dir = directory(root)?;
     let mut components = Path::new(name).components().peekable();
@@ -111,12 +147,18 @@ fn locate(root: &Path, name: &str) -> Result<File> {
             return Err("invalid shelf path".into());
         }
         if components.peek().is_some() {
-            dir = File::from(
-                openat(&dir, part, DIRECTORY, Mode::empty())
-                    .map_err(|_| "shelf original unavailable")?,
-            );
+            let opened = openat(&dir, part, DIRECTORY, Mode::empty()).or_else(|e| {
+                match composed_entry(&dir, part) {
+                    Some(stored) => openat(&dir, stored.as_os_str(), DIRECTORY, Mode::empty()),
+                    None => Err(e),
+                }
+            });
+            dir = File::from(opened.map_err(|_| "shelf original unavailable")?);
         } else {
-            return original(&dir, part);
+            return original(&dir, part).or_else(|e| match composed_entry(&dir, part) {
+                Some(stored) => original(&dir, &stored),
+                None => Err(e),
+            });
         }
     }
     Err("empty shelf path".into())
@@ -142,11 +184,44 @@ pub fn open_original(root: &Path, name: &str) -> Result<Original> {
     }
 }
 
-pub fn index(root: &Path, docs: &mut BTreeMap<String, String>) -> Result<()> {
-    walk(&directory(root)?, "", docs)
+/// Originals the index could not open, so one unreadable file does not stop the rest.
+#[derive(Default)]
+struct Skipped {
+    count: usize,
+    /// A name showed `?`: the store sent names the host could not decode.
+    undecoded_names: bool,
 }
 
-fn walk(dir: &File, prefix: &str, docs: &mut BTreeMap<String, String>) -> Result<()> {
+impl Skipped {
+    fn add(&mut self, name: &str) {
+        self.count += 1;
+        self.undecoded_names |= name.contains('?');
+    }
+}
+
+pub fn index(root: &Path, docs: &mut BTreeMap<String, String>) -> Result<()> {
+    let mut skipped = Skipped::default();
+    walk(&directory(root)?, "", docs, &mut skipped)?;
+    if skipped.count > 0 {
+        eprintln!(
+            "shelf: skipped {} original(s) that could not be opened{}",
+            skipped.count,
+            if skipped.undecoded_names {
+                "; some names contain '?', so mount the network share with iocharset=utf8"
+            } else {
+                ""
+            }
+        );
+    }
+    Ok(())
+}
+
+fn walk(
+    dir: &File,
+    prefix: &str,
+    docs: &mut BTreeMap<String, String>,
+    skipped: &mut Skipped,
+) -> Result<()> {
     for entry in Dir::read_from(dir).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let Ok(name) = entry.file_name().to_str() else {
@@ -155,37 +230,41 @@ fn walk(dir: &File, prefix: &str, docs: &mut BTreeMap<String, String>) -> Result
         if name.starts_with('.') {
             continue;
         }
-        let rel = format!("{prefix}{name}");
+        let rel = format!("{prefix}{}", compose_hangul(name));
         // Network file stores may leave the directory entry type unknown.
         let kind = match entry.file_type() {
-            FileType::Unknown => FileType::from_raw_mode(
-                statat(dir, name, AtFlags::SYMLINK_NOFOLLOW)
-                    .map_err(|e| e.to_string())?
-                    .st_mode,
-            ),
+            FileType::Unknown => match statat(dir, name, AtFlags::SYMLINK_NOFOLLOW) {
+                Ok(stat) => FileType::from_raw_mode(stat.st_mode),
+                Err(_) => {
+                    skipped.add(name);
+                    continue;
+                }
+            },
             known => known,
         };
         match kind {
-            FileType::Directory => {
-                let sub = File::from(
-                    openat(dir, name, DIRECTORY, Mode::empty()).map_err(|e| e.to_string())?,
-                );
-                walk(&sub, &format!("{rel}/"), docs)?;
-            }
+            FileType::Directory => match openat(dir, name, DIRECTORY, Mode::empty()) {
+                Ok(sub) => walk(&File::from(sub), &format!("{rel}/"), docs, skipped)?,
+                Err(_) => skipped.add(name),
+            },
             FileType::RegularFile
                 if matches!(
                     Path::new(name).extension().and_then(|e| e.to_str()),
                     Some("md" | "txt")
                 ) =>
             {
+                let Ok(mut file) = original(dir, name.as_ref()) else {
+                    skipped.add(name);
+                    continue;
+                };
                 let mut text = String::new();
-                match original(dir, name.as_ref())?.read_to_string(&mut text) {
+                match file.read_to_string(&mut text) {
                     Ok(_) if !text.contains('\0') => {
                         docs.insert(format!("shelf:{rel}"), text);
                     }
                     Ok(_) => (),
                     Err(e) if e.kind() == std::io::ErrorKind::InvalidData => (),
-                    Err(e) => return Err(e.to_string()),
+                    Err(_) => skipped.add(name),
                 }
             }
             _ => (),
@@ -219,6 +298,40 @@ mod tests {
         }
         assert!(read(tmp.path(), "reports/scan.pdf").is_err());
         assert!(open_original(tmp.path(), "../outside.pdf").is_err());
+    }
+
+    #[test]
+    fn a_decomposed_korean_name_is_indexed_and_read_by_its_composed_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        // "회의" as macOS stores it: jamo, not syllables.
+        let decomposed = "\u{1112}\u{116C}\u{110B}\u{1174}";
+        std::fs::create_dir(tmp.path().join(format!("{decomposed}록"))).unwrap();
+        std::fs::write(
+            tmp.path().join(format!("{decomposed}록/{decomposed}.md")),
+            "minutes",
+        )
+        .unwrap();
+
+        let mut docs = BTreeMap::new();
+        index(tmp.path(), &mut docs).unwrap();
+        assert_eq!(docs.keys().collect::<Vec<_>>(), ["shelf:회의록/회의.md"]);
+        assert_eq!(read(tmp.path(), "회의록/회의.md").unwrap().0, "minutes");
+    }
+
+    #[test]
+    fn an_unreadable_original_is_skipped_instead_of_stopping_the_index() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("open.md"), "kept").unwrap();
+        let locked = tmp.path().join("locked.md");
+        std::fs::write(&locked, "hidden").unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if File::open(&locked).is_ok() {
+            return; // Running as root: permissions cannot make the file unreadable.
+        }
+        let mut docs = BTreeMap::new();
+        index(tmp.path(), &mut docs).unwrap();
+        assert_eq!(docs.keys().collect::<Vec<_>>(), ["shelf:open.md"]);
     }
 
     #[test]
