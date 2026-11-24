@@ -287,9 +287,6 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
         "room":service}});
     if example {
         profile["services"]["library"]["environment"]["LIBRARY_START"] = "example".into();
-    } else {
-        // The bundled golden questions fit only the example; other libraries grow their own.
-        profile["services"]["librarian"]["environment"]["LIBRARY_GOLDEN"] = "".into();
     }
     // Only the long-running services restart; the library service runs one command and exits.
     for svc in ["room", "librarian"] {
@@ -345,6 +342,9 @@ fn install_common_skill(wiki: &Path) -> Result<(), String> {
         Err(e) => Err(e.to_string()),
     }
 }
+
+/// The golden questions that fit the bundled example library.
+const EXAMPLE_GOLDEN: &str = "/app/examples/golden.jsonl";
 
 fn activate(data: &Path) -> Result<(), String> {
     let lock_path = data.join(".setup.lock");
@@ -425,6 +425,18 @@ fn activate(data: &Path) -> Result<(), String> {
     }
     if let Some(reg) = upgrade {
         crate::files::atomic(&registry, reg.to_string().as_bytes(), false)?;
+    }
+    if std::env::var("LIBRARY_START").as_deref() == Ok("example") {
+        // Only the example start gets the bundled golden questions; other libraries grow their own
+        // from filed answers. An existing file is kept.
+        let golden = data.join("golden");
+        crate::files::no_link(&golden)?;
+        fs::create_dir_all(&golden).map_err(|e| e.to_string())?;
+        let target = golden.join("main.jsonl");
+        if !target.exists() {
+            let bundled = fs::read(EXAMPLE_GOLDEN).map_err(|e| format!("{EXAMPLE_GOLDEN}: {e}"))?;
+            crate::files::atomic(&target, &bundled, true)?;
+        }
     }
     install_common_skill(&wiki)?;
     let indexed = std::process::Command::new(std::env::current_exe().map_err(|e| e.to_string())?)
@@ -579,11 +591,6 @@ mod tests {
             let mut same = v["services"][other].clone();
             let restart = same.as_object_mut().unwrap().remove("restart");
             assert_eq!(restart, Some(json!("unless-stopped")));
-            if other == "librarian" {
-                // Only the example start uses the bundled golden questions.
-                let golden = same["environment"].as_object_mut().unwrap().remove("LIBRARY_GOLDEN");
-                assert_eq!(golden, Some(json!("")));
-            }
             assert_eq!(svc, &same);
         }
     }

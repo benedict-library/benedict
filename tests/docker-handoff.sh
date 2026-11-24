@@ -13,7 +13,8 @@ trap cleanup EXIT
   jq -e '.database_ready == true' >/dev/null
 "${compose[@]}" run --rm -T --entrypoint sh library -ec '
   test -f /app/rooms/room_read.py && test ! -e /app/rooms/room_query.py
-  test -r /shelf/river-field-note.md && test ! -w /shelf/river-field-note.md'
+  test -r /shelf/river-field-note.md && test ! -w /shelf/river-field-note.md
+  cmp /app/examples/golden.jsonl /data/golden/main.jsonl'
 source=shelf:river-field-note.md
 library read "$source" | jq -e '.text | contains("violet")' >/dev/null
 question='Why use violet markers?'
