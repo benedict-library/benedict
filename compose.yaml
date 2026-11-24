@@ -23,6 +23,8 @@ services:
     environment:
       LIBRARY_ROOM_SOCKET: /data/rooms.sock
     command: [room, serve]
+    # Installed profiles set this from the autostart answer.
+    restart: ${LIBRARY_RESTART:-unless-stopped}
     volumes: *library-mounts
     healthcheck:
       test: ["CMD", "benedict", "room", "ping"]
@@ -37,7 +39,7 @@ services:
     depends_on:
       room:
         condition: service_healthy
-    restart: "on-failure:3"
+    restart: ${LIBRARY_RESTART:-unless-stopped}
     command: [librarian, --config, /data/library.json, --golden, /app/examples/golden.jsonl, --iterations, "365", --interval, "86400"]
     volumes: *library-mounts
 volumes:

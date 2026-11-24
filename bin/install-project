@@ -21,6 +21,9 @@ while [[ ${1:-} == --* ]]; do
       answer_args+=(--database-secret-file "$(cd -- "$(dirname -- "$2")" && pwd -P)/$(basename -- "$2")") ;;
     --memory)
       answer_args+=(--memory "$2") ;;
+    --autostart)
+      [[ $2 == on || $2 == off ]] || { echo 'expected --autostart on or off' >&2; exit 2; }
+      answer_args+=(--autostart "$2") ;;
     --shelf)
       if [[ $2 == none ]]; then
         answer_args+=(--shelf none)
@@ -33,7 +36,7 @@ while [[ ${1:-} == --* ]]; do
   shift 2
 done
 if (( $# < 1 || $# > 2 )); then
-  echo 'usage: bin/install-project [--start example|empty | --wiki DIR] [--database sqlite|postgres] [--database-secret-file FILE] [--memory SIZE] [--shelf DIR|none] EXISTING_WORKSPACE [CONFIRMED_COMPOSE_PROFILE.json]' >&2
+  echo 'usage: bin/install-project [--start example|empty | --wiki DIR] [--database sqlite|postgres] [--database-secret-file FILE] [--memory SIZE] [--shelf DIR|none] [--autostart on|off] EXISTING_WORKSPACE [CONFIRMED_COMPOSE_PROFILE.json]' >&2
   exit 2
 fi
 repo=$(cd -- "$(dirname -- "$0")/.." && pwd -P)

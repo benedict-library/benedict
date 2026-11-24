@@ -5,6 +5,15 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Setup asks whether the library starts again when the host restarts (`--autostart on|off`). `on`, the
+  recommended answer and the example start's default, gives the room and librarian containers
+  `restart: unless-stopped`; `off` sets `restart: "no"` for a trial library. `compose.yaml` uses
+  `${LIBRARY_RESTART:-unless-stopped}` for both services, so an installed project without the answer starts
+  again with the host after `docker compose up -d`. Before, the room container had no restart policy, so it
+  did not come back after a host restart.
+
 ### Changed
 
 - The project entry point (`.benedict/library`) sends each command into the running room container with
