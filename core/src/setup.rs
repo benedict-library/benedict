@@ -421,13 +421,64 @@ fn activate(data: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Memory limit in MiB for a wiki of this size, and whether it fits in two thirds of Docker's memory.
+/// The steps follow measured first installs: 2,285 pages (35 MB) indexed at 1 GiB, 21,706 pages
+/// (135 MB) at 2 GiB, and 42,000 pages (540 MB) were killed at 512 MiB and indexed at 3 GiB.
+/// Beyond that, each further 20,000 pages adds 1 GiB. The installer retries with a larger limit if
+/// initial indexing still runs out of memory.
+fn recommend_memory(pages: u64, bytes: u64, docker: u64) -> (u64, bool) {
+    const MIB: u64 = 1024 * 1024;
+    let mb = bytes / MIB;
+    let need = if pages <= 1_000 && mb <= 20 {
+        512
+    } else if pages <= 5_000 && mb <= 100 {
+        1024
+    } else if pages <= 25_000 && mb <= 300 {
+        2048
+    } else if pages <= 50_000 && mb <= 700 {
+        3072
+    } else {
+        3072 + 1024 * pages.saturating_sub(50_000).div_ceil(20_000).max(1)
+    };
+    let cap = docker / MIB / 3 * 2;
+    if docker == 0 || need <= cap {
+        (need, true)
+    } else {
+        (cap.max(512), false)
+    }
+}
+
+fn recommend(args: &[String]) -> Result<(), String> {
+    let mut values = BTreeMap::new();
+    for pair in args.chunks(2) {
+        match (pair[0].as_str(), pair.get(1).and_then(|v| v.parse::<u64>().ok())) {
+            (key @ ("--pages" | "--bytes" | "--docker-memory"), Some(v)) => {
+                values.insert(key, v);
+            }
+            _ => return Err("setup --recommend-memory --pages N --bytes N --docker-memory N".into()),
+        }
+    }
+    let get = |k| values.get(k).copied().unwrap_or(0);
+    let (mib, fits) = recommend_memory(get("--pages"), get("--bytes"), get("--docker-memory"));
+    let memory = if mib % 1024 == 0 {
+        format!("{}g", mib / 1024)
+    } else {
+        format!("{mib}m")
+    };
+    println!("{}", json!({"memory": memory, "fits": fits}));
+    Ok(())
+}
+
 pub fn run(args: &[String]) -> Result<(), String> {
     if args == ["--activate"] {
         return activate(Path::new("/data"));
     }
+    if args.first().map(String::as_str) == Some("--recommend-memory") {
+        return recommend(&args[1..]);
+    }
     if args == ["--help"] || args.is_empty() {
         println!(
-            "setup --project NAME --output FILE [--memory 512m] [--database sqlite|postgres] [--database-secret-file /host/secret] [--answers INTERVIEW.json] [--start empty|example] [--wiki /host/wiki] [--shelf /host/shelf] [--autostart on|off]\nsetup --activate"
+            "setup --project NAME --output FILE [--memory 512m] [--database sqlite|postgres] [--database-secret-file /host/secret] [--answers INTERVIEW.json] [--start empty|example] [--wiki /host/wiki] [--shelf /host/shelf] [--autostart on|off]\nsetup --activate\nsetup --recommend-memory --pages N --bytes N --docker-memory N"
         );
         return Ok(());
     }
@@ -460,6 +511,20 @@ mod tests {
     fn args(s: &[&str]) -> Vec<String> {
         s.iter().map(|s| s.to_string()).collect()
     }
+    #[test]
+    fn recommends_memory_from_measured_wiki_sizes() {
+        const MIB: u64 = 1024 * 1024;
+        let docker = 32 * 1024 * MIB;
+        assert_eq!(recommend_memory(5, MIB, docker), (512, true));
+        assert_eq!(recommend_memory(2_285, 35 * MIB, docker), (1024, true));
+        assert_eq!(recommend_memory(21_706, 135 * MIB, docker), (2048, true));
+        assert_eq!(recommend_memory(42_064, 540 * MIB, docker), (3072, true));
+        assert_eq!(recommend_memory(90_000, 900 * MIB, docker), (5120, true));
+        // A Docker VM of 3 GiB leaves 2 GiB for the library.
+        assert_eq!(recommend_memory(42_064, 540 * MIB, 3 * 1024 * MIB), (2048, false));
+        assert!(recommend(&args(&["--pages", "x"])).is_err());
+    }
+
     #[test]
     fn isolates_mounts_and_credentials() {
         let (_, v) = overlay(&args(&[

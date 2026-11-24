@@ -51,7 +51,7 @@ Keep this folder after installing: your project opens its library with the setti
 bin/install-project --start example ~/projects/notes
 ```
 
-Replace `~/projects/notes` with your project folder (create it first if it does not exist). The example brings its own example shelf. To start from your own wiki, answer every setup question instead of `--start example`: `--wiki WIKI_FOLDER --database sqlite --memory 512m --shelf ORIGINALS_FOLDER --autostart on` (or `--shelf none` to start with an empty shelf, `--autostart off` to start the library yourself after a host restart). A missing answer stops the installation and prints the question to ask.
+Replace `~/projects/notes` with your project folder (create it first if it does not exist). The example brings its own example shelf. To start from your own wiki, use `--wiki WIKI_FOLDER` instead of `--start example`. The installer sets the memory limit from the wiki size, uses SQLite without a shelf, starts the librarian and brings the library back after a host restart. Its summary shows each choice and the option that changes it (`--memory`, `--database`, `--shelf`, `--autostart`, `--librarian`). It asks a question only if the library cannot write your wiki.
 
 **3. Check the connection.**
 
@@ -67,6 +67,6 @@ Replace `~/projects/notes` with your project folder (create it first if it does 
 
 The agent reads the project instructions the installer added (AGENTS.md, CLAUDE.md, GEMINI.md) and uses the library.
 
-You can also ask an agent to “install Benedict for this project”; it follows the same steps. To upgrade, run `git pull` in this folder and then `bin/install-project ~/projects/notes` again (`--start` is only for the first installation). See the [changelog](CHANGELOG.md) for what each version changed, the [installation guide](docs/docker-setup.md) for unattended setup and shelf or PostgreSQL connections, and the [Python compatibility commands](docs/python-compat.md) to try it without Docker.
+You can also ask an agent to “install Benedict for this project”; it follows [install.md](install.md), asks where to start and tells you what the installer chose. To upgrade, run `git pull` in this folder and then `bin/install-project ~/projects/notes` again (`--start` is only for the first installation). See the [changelog](CHANGELOG.md) for what each version changed, the [installation guide](docs/docker-setup.md) for unattended setup and shelf or PostgreSQL connections, and the [Python compatibility commands](docs/python-compat.md) to try it without Docker.
 
 [Runtime and storage](docs/portability.md) · [Room commands and examples](docs/agent-usage.md) · [Courier](docs/courier.md) · [Plaza](docs/plaza.md) · [Verification](docs/verification.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [MIT license](LICENSE)

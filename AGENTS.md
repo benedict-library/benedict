@@ -11,7 +11,7 @@ Work alone in the reading room. For shared work, put the sources and the open qu
 
 Read the [library method](docs/method.md) or [한국어 운영 방법](docs/method.ko.md). The [agent guide](docs/agent-usage.md) shows the commands.
 
-For a new installation, use the start source the user requested. If unspecified, ask the start question before running any installation command. Use --wiki DIR for an existing wiki or --start example|empty for the requested starting point. For Docker installations, start with the [installation interview](docs/docker-setup.md#installation-interview), show one clickable question at a time, and follow the recorded choices and use the Rust `benedict` commands inside the container. Pass the original user question separately from the agent’s query when recording a search.
+For a new installation, use the start source the user requested. If unspecified, ask the start question before running any installation command. Use --wiki DIR for an existing wiki or --start example|empty for the requested starting point. For Docker installations, follow [install.md](install.md): ask only the start question, let the installer choose and check the rest, and ask the user again only when the installer stops with a reason. For an unattended interview with recorded answers, see the [installation interview](docs/docker-setup.md#installation-interview). Pass the original user question separately from the agent’s query when recording a search.
 
 When installing for a user, list existing skill and wiki candidates by name. Use the README import preview and show its resolved sources, included files and destination. Wait for user confirmation for that selection before importing. If the source cannot be read, report the path and stop that import.
 
