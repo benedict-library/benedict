@@ -21,6 +21,7 @@ fn options(args: &[String]) -> Result<BTreeMap<&str, &str>, String> {
                 | "--start"
                 | "--wiki"
                 | "--shelf"
+                | "--autostart"
                 | "--output"
                 | "--answers"
         ) || pair.len() != 2
@@ -151,6 +152,19 @@ fn apply_answers(
         (Some("folder" | "other"), _) => require(false, "--shelf", "shelf")?,
         _ => return Err(conflict("shelf")),
     }
+    // Answers recorded before this question have no autostart choice; overlay asks it then.
+    match (answers.get("autostart").map(String::as_str), opts.get("--autostart").copied()) {
+        (None, _) => (),
+        (Some("on"), None | Some("on")) => {
+            opts.insert("--autostart", "on");
+        }
+        (Some("off"), None | Some("off")) => {
+            opts.insert("--autostart", "off");
+        }
+        (Some("other"), Some(_)) => (),
+        (Some("other"), None) => require(false, "--autostart", "autostart")?,
+        _ => return Err(conflict("autostart")),
+    }
     Ok(())
 }
 
@@ -186,7 +200,12 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
     };
     // Only the example keeps its one-line start; any other library asks every remaining question in order.
     if !example {
-        for (option, step) in [("--database", "database"), ("--memory", "memory"), ("--shelf", "shelf")] {
+        for (option, step) in [
+            ("--database", "database"),
+            ("--memory", "memory"),
+            ("--shelf", "shelf"),
+            ("--autostart", "autostart"),
+        ] {
             if !opts.contains_key(option) {
                 return Err(crate::wizard::prompt(step, own)?.to_string());
             }
@@ -197,6 +216,12 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
         .ok_or("missing --output FILE")?
         .to_string();
     let memory = memory_bytes(opts.get("--memory").copied().unwrap_or("512m"))?;
+    // The example start keeps its one line and takes the recommended answer.
+    let restart = match opts.get("--autostart").copied().unwrap_or("on") {
+        "on" => "unless-stopped",
+        "off" => "no",
+        _ => return Err("--autostart must be on or off".into()),
+    };
     let mut env = json!({"LIBRARY_PROJECT":project, "LIBRARY_DB":"/data/library.sqlite3", "LIBRARY_CONFIG":"/data/library.json", "LIBRARY_ROOM_SOCKET":"/data/rooms.sock"});
     let secret_file = opts
         .get("--database-secret-file")
@@ -257,6 +282,10 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
         "room":service}});
     if example {
         profile["services"]["library"]["environment"]["LIBRARY_START"] = "example".into();
+    }
+    // Only the long-running services restart; the library service runs one command and exits.
+    for svc in ["room", "librarian"] {
+        profile["services"][svc]["restart"] = restart.into();
     }
     if empty_shelf {
         profile["volumes"] = json!({"empty_shelf":{}});
@@ -398,7 +427,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     }
     if args == ["--help"] || args.is_empty() {
         println!(
-            "setup --project NAME --output FILE [--memory 512m] [--database sqlite|postgres] [--database-secret-file /host/secret] [--answers INTERVIEW.json] [--start empty|example] [--wiki /host/wiki] [--shelf /host/shelf]\nsetup --activate"
+            "setup --project NAME --output FILE [--memory 512m] [--database sqlite|postgres] [--database-secret-file /host/secret] [--answers INTERVIEW.json] [--start empty|example] [--wiki /host/wiki] [--shelf /host/shelf] [--autostart on|off]\nsetup --activate"
         );
         return Ok(());
     }
@@ -446,6 +475,8 @@ mod tests {
             "/tmp/b",
             "--memory",
             "512m",
+            "--autostart",
+            "on",
         ]))
         .unwrap();
         let svc = &v["services"]["library"];
@@ -454,9 +485,14 @@ mod tests {
         assert_eq!(svc["volumes"][1]["read_only"], true);
         assert_eq!(svc["volumes"][0]["bind"]["create_host_path"], false);
         assert_eq!(svc["environment"]["LIBRARY_PROJECT"], "one");
-        assert_eq!(svc, &v["services"]["librarian"]);
+        assert!(svc.get("restart").is_none());
         // Entry point commands run in the room container, so it opens the same wiki and shelf.
-        assert_eq!(svc, &v["services"]["room"]);
+        for other in ["librarian", "room"] {
+            let mut same = v["services"][other].clone();
+            let restart = same.as_object_mut().unwrap().remove("restart");
+            assert_eq!(restart, Some(json!("unless-stopped")));
+            assert_eq!(svc, &same);
+        }
     }
     #[test]
     fn profile_only_references_secret_and_seeds_the_chosen_library() {
@@ -559,7 +595,7 @@ mod tests {
         let mut opts = args(&["--project", "a", "--output", path.to_str().unwrap()]);
         assert!(run(&opts).unwrap_err().contains("어떤 자료로 시작할까요?"));
         assert!(!path.exists());
-        opts.extend(args(&["--start", "empty", "--database", "sqlite", "--memory", "512m", "--shelf", "none"]));
+        opts.extend(args(&["--start", "empty", "--database", "sqlite", "--memory", "512m", "--shelf", "none", "--autostart", "off"]));
         run(&opts).unwrap();
         let first = fs::read(&path).unwrap();
         run(&opts).unwrap();
@@ -588,6 +624,7 @@ mod tests {
             (&["--database", "sqlite"], "컨테이너 하나가 쓸 메모리 상한을 어떻게 정할까요?"),
             (&["--database", "sqlite", "--memory", "512m"], "서가 원본은 어디에서 읽을까요?"),
             (&["--memory", "512m", "--shelf", "none"], "각 실의 기록을 어디에 저장할까요?"),
+            (&["--database", "sqlite", "--memory", "512m", "--shelf", "none"], "서버를 다시 켜면 도서관도 저절로 켤까요?"),
         ];
         for (given, question) in cases {
             let mut all = wiki.to_vec();
@@ -600,7 +637,7 @@ mod tests {
     }
     #[test]
     fn own_material_never_receives_the_example_shelf() {
-        let answered = ["--wiki", "/srv/wiki", "--database", "sqlite", "--memory", "512m"];
+        let answered = ["--wiki", "/srv/wiki", "--database", "sqlite", "--memory", "512m", "--autostart", "on"];
         let mut folder = answered.to_vec();
         folder.extend(["--shelf", "/srv/originals"]);
         let (_, v) = overlay(&base(&folder)).unwrap();
@@ -660,6 +697,31 @@ mod tests {
         apply_answers(&mut BTreeMap::new(), &answers("example", Some("default"))).unwrap();
     }
     #[test]
+    fn autostart_answer_sets_restart_for_long_running_services() {
+        let own = ["--wiki", "/srv/wiki", "--database", "sqlite", "--memory", "512m", "--shelf", "none"];
+        for (answer, policy) in [("on", "unless-stopped"), ("off", "no")] {
+            let mut all = own.to_vec();
+            all.extend(["--autostart", answer]);
+            let (_, v) = overlay(&base(&all)).unwrap();
+            assert_eq!(v["services"]["room"]["restart"], policy);
+            assert_eq!(v["services"]["librarian"]["restart"], policy);
+            assert!(v["services"]["library"].get("restart").is_none());
+        }
+        let (_, v) = overlay(&base(&["--start", "example"])).unwrap();
+        assert_eq!(v["services"]["room"]["restart"], "unless-stopped");
+        let answers = |choice: &str| -> BTreeMap<String, String> {
+            [("start", "wiki"), ("database", "sqlite"), ("memory", "default"), ("shelf", "none"), ("autostart", choice)]
+                .into_iter()
+                .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                .collect()
+        };
+        let mut opts = BTreeMap::from([("--wiki", "/srv/wiki")]);
+        apply_answers(&mut opts, &answers("off")).unwrap();
+        assert_eq!(opts["--autostart"], "off");
+        let mut conflict = BTreeMap::from([("--wiki", "/srv/wiki"), ("--autostart", "on")]);
+        assert!(apply_answers(&mut conflict, &answers("off")).is_err());
+    }
+    #[test]
     fn rejects_overlap_duplicates_and_invalid_values() {
         for extra in [
             &["--shelf", "/wiki/x", "--wiki", "/wiki"][..],
@@ -678,6 +740,7 @@ mod tests {
             &["--start", "example", "--wiki", "/wiki"],
             &["--memory", "2m"],
             &["--memory", "1g", "--memory", "2g"],
+            &["--start", "example", "--autostart", "maybe"],
         ] {
             let mut all = args(&["--project", "a", "--output", "x"]);
             all.extend(args(extra));
