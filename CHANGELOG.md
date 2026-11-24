@@ -23,6 +23,11 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A Docker library bound to your own wiki now gives you read and write access to every page it
+  files there. Answers saved through the room and the originals kept by `web-source` were written
+  for the container's account only, so the wiki's owner could not open, back up or commit them.
+  Pages filed before this change keep their old access; grant it once as described in the Docker
+  setup guide.
 - Installing your own wiki or an empty library now requires every setup answer. Setup used to finish
   without the database, memory and shelf answers and then mounted the bundled example shelf into a library
   built from your own material. It now stops at the first missing answer and prints that question. The

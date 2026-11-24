@@ -40,7 +40,15 @@ def summary(a):
     return (m.group(1) if m else a)[:200]
 
 
-def atomic_text(path, text, *, mode=None, creation_mode=0o600):
+def wiki_user(root):
+    """The installer of a wiki bound into a Docker library, when the library writes as another account."""
+    user = os.environ.get("LIBRARY_WIKI_USER")
+    if Path(root).as_posix() != "/data/wiki" or not user or int(user) == os.geteuid():
+        return None
+    return int(user)
+
+
+def atomic_text(path, text, *, mode=None, creation_mode=0o600, share=None):
     path.parent.mkdir(parents=True, exist_ok=True)
     name = path.parent / ("library-write-" + uuid.uuid4().hex)
     fd = os.open(name, os.O_CREAT | os.O_EXCL | os.O_WRONLY, creation_mode)
@@ -50,6 +58,13 @@ def atomic_text(path, text, *, mode=None, creation_mode=0o600):
             out.flush()
             if mode is not None:
                 os.chmod(name, mode)
+            if share is not None:
+                # The same grant as the native client: the installer can open pages the library files.
+                grant = subprocess.run(["setfacl", "--set", f"u::rw-,u:{share}:rw-,g::---,m::rw-,o::---",
+                                        "--", str(name)])
+                if grant.returncode:
+                    raise ValueError("cannot grant the host user access to the wiki page; "
+                                     "check filesystem ACL support")
             os.fsync(out.fileno())
         os.replace(name, path)
     finally:
@@ -107,7 +122,7 @@ def write_page(path, log, q, answer, refs, now, *, creation_mode=0o600):
     before_question = f"{HISTORY_SECTION}{history.rstrip()}\n\n" if history else ""
     text = (f'---\ntitle: {json.dumps(q, ensure_ascii=False)}\ntype: query\ntags: [query, {tags(q)}]\ncreated: {day}\nsaved_at: {stamp}\n---'
             f'\n\n{summary(answer)}\n\n{before_question}{current}')
-    atomic_text(path, text, mode=mode, creation_mode=creation_mode)
+    atomic_text(path, text, mode=mode, creation_mode=creation_mode, share=wiki_user(log.parent))
     with log.open("a", encoding="utf-8") as out:
         out.write(f"\n## [{day}] query | {q}\n")
     return text

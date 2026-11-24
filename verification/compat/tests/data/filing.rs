@@ -236,3 +236,45 @@ fn backups_restore_exact_bytes_and_check_integrity_before_writing() {
     );
     assert!(!l.path("bad-target").exists());
 }
+
+// A Docker library writes as its own account into the installer's wiki. The grant command is
+// recorded here so the test does not depend on ACL support in the temporary directory.
+#[cfg(unix)]
+#[test]
+fn bound_wiki_filing_grants_the_installer_access() {
+    let l = Library::empty();
+    let body = r#"
+from datetime import datetime, timezone
+import save_query
+base = Path(sys.argv[1])
+tools, grants, wiki = base / "tools", base / "grants", base / "wiki"
+tools.mkdir()
+(tools / "setfacl").write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$GRANT_LOG"\ncp "$4" "$GRANT_LOG.page"\n')
+(tools / "setfacl").chmod(0o755)
+os.environ["PATH"] = str(tools) + os.pathsep + os.environ["PATH"]
+os.environ["GRANT_LOG"] = str(grants)
+installer = os.geteuid() + 1
+os.environ["LIBRARY_WIKI_USER"] = str(installer)
+assert save_query.wiki_user(Path("/data/wiki")) == installer
+assert save_query.wiki_user(wiki) is None
+os.environ["LIBRARY_WIKI_USER"] = str(os.geteuid())
+assert save_query.wiki_user(Path("/data/wiki")) is None
+del os.environ["LIBRARY_WIKI_USER"]
+assert save_query.wiki_user(Path("/data/wiki")) is None
+now = datetime(2030, 1, 2, tzinfo=timezone.utc)
+page = wiki / "queries" / "q.md"
+save_query.write_page(page, wiki / "log.md", "q", "first", "", now)
+assert not grants.exists()
+save_query.wiki_user = lambda root: installer
+for answer in ("second", "third"):
+    grants.unlink(missing_ok=True)
+    save_query.write_page(page, wiki / "log.md", "q", answer, "", now)
+    option, entries, end, granted = grants.read_text().splitlines()
+    assert (option, entries, end) == ("--set", f"u::rw-,u:{installer}:rw-,g::---,m::rw-,o::---", "--")
+    assert Path(granted).parent == page.parent and Path(granted) != page
+    assert answer in Path(str(grants) + ".page").read_text(encoding="utf-8")
+    assert answer in page.read_text(encoding="utf-8")
+"#;
+    let base = l.path("").display().to_string();
+    checked(l.bridge(body, &[&base]), 0);
+}
