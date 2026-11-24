@@ -22,6 +22,7 @@ fn options(args: &[String]) -> Result<BTreeMap<&str, &str>, String> {
                 | "--wiki"
                 | "--shelf"
                 | "--autostart"
+                | "--transcript-days"
                 | "--output"
                 | "--answers"
         ) || pair.len() != 2
@@ -222,7 +223,11 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
         "off" => "no",
         _ => return Err("--autostart must be on or off".into()),
     };
-    let mut env = json!({"LIBRARY_PROJECT":project, "LIBRARY_DB":"/data/library.sqlite3", "LIBRARY_CONFIG":"/data/library.json", "LIBRARY_ROOM_SOCKET":"/data/rooms.sock"});
+    let transcripts = opts.get("--transcript-days").copied().unwrap_or("keep");
+    if transcripts != "keep" && !transcripts.parse::<u64>().is_ok_and(|d| d > 0) {
+        return Err("--transcript-days must be keep or a number of days".into());
+    }
+    let mut env = json!({"LIBRARY_PROJECT":project, "LIBRARY_DB":"/data/library.sqlite3", "LIBRARY_CONFIG":"/data/library.json", "LIBRARY_ROOM_SOCKET":"/data/rooms.sock", "LIBRARY_TRANSCRIPT_DAYS":transcripts});
     let secret_file = opts
         .get("--database-secret-file")
         .map(|s| host_path(s))
@@ -282,6 +287,9 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
         "room":service}});
     if example {
         profile["services"]["library"]["environment"]["LIBRARY_START"] = "example".into();
+    } else {
+        // The bundled golden questions fit only the example; other libraries grow their own.
+        profile["services"]["librarian"]["environment"]["LIBRARY_GOLDEN"] = "".into();
     }
     // Only the long-running services restart; the library service runs one command and exits.
     for svc in ["room", "librarian"] {
@@ -303,16 +311,35 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
 }
 
 const COMMON_SKILL: &[u8] = include_bytes!("../../docs/skills/benedict-library/SKILL.md");
+// SHA-256 of the bundled skill page as earlier releases wrote it. An upgrade replaces
+// an untouched earlier page; a page someone edited is left alone.
+const PREVIOUS_SKILLS: &[&str] = &[
+    "8bdb125594bb8ab8dd90381824ce5b6e96d02d4f3f84087bb84ecdc6dc3dacd9",
+    "48d763b1b48362b3b706ee865dd3c73eb7bcfe1e8490e73fddf0d47590a619ce",
+];
+const EDITED_SKILL: &str = "entities/skill_benedict-library.md was edited after installation; \
+    move your version to another name (for example entities/skill_benedict-library.local.md) \
+    and run the installer again";
 
 fn install_common_skill(wiki: &Path) -> Result<(), String> {
+    use sha2::{Digest, Sha256};
     let directory = wiki.join("entities");
     crate::files::no_link(&directory)?;
     fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
     let page = directory.join("skill_benedict-library.md");
     crate::files::no_link(&page)?;
     match fs::symlink_metadata(&page) {
-        Ok(meta) if meta.is_file() && fs::read(&page).map_err(|e| e.to_string())? == COMMON_SKILL => Ok(()),
-        Ok(_) => Err("bundled skill conflicts with entities/skill_benedict-library.md; preserve and review the existing page".into()),
+        Ok(meta) if meta.is_file() => {
+            let current = fs::read(&page).map_err(|e| e.to_string())?;
+            if current == COMMON_SKILL {
+                Ok(())
+            } else if PREVIOUS_SKILLS.contains(&format!("{:x}", Sha256::digest(&current)).as_str()) {
+                crate::files::wiki_page(&page, COMMON_SKILL, wiki)
+            } else {
+                Err(EDITED_SKILL.into())
+            }
+        }
+        Ok(_) => Err(EDITED_SKILL.into()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound =>
             crate::files::create_wiki_page(&page, COMMON_SKILL, wiki),
         Err(e) => Err(e.to_string()),
@@ -556,8 +583,26 @@ mod tests {
             let mut same = v["services"][other].clone();
             let restart = same.as_object_mut().unwrap().remove("restart");
             assert_eq!(restart, Some(json!("unless-stopped")));
+            if other == "librarian" {
+                // Only the example start uses the bundled golden questions.
+                let golden = same["environment"].as_object_mut().unwrap().remove("LIBRARY_GOLDEN");
+                assert_eq!(golden, Some(json!("")));
+            }
             assert_eq!(svc, &same);
         }
+    }
+    #[test]
+    fn an_untouched_earlier_skill_page_is_replaced_and_an_edited_one_is_kept() {
+        let wiki = tempfile::tempdir().unwrap();
+        let page = wiki.path().join("entities/skill_benedict-library.md");
+        fs::create_dir_all(page.parent().unwrap()).unwrap();
+        fs::write(&page, include_bytes!("../tests/fixtures/skill-0.2.0.md")).unwrap();
+        install_common_skill(wiki.path()).unwrap();
+        assert_eq!(fs::read(&page).unwrap(), COMMON_SKILL);
+        fs::write(&page, b"my own notes").unwrap();
+        let err = install_common_skill(wiki.path()).unwrap_err();
+        assert!(err.contains("edited after installation"), "{err}");
+        assert_eq!(fs::read(&page).unwrap(), b"my own notes");
     }
     #[test]
     fn profile_only_references_secret_and_seeds_the_chosen_library() {

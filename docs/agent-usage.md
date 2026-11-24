@@ -89,6 +89,12 @@ python3 bin/librarian.py --config /tmp/example-library/library.json --library ma
 index and rooms, evaluates, and journals actual outcomes. A missing golden file is warning; cycle failures are
 failures. `--backup-dir` explicitly enables a local backup step and requires Git.
 
+The native Rust librarian reads `golden/LIBRARY.jsonl` next to `library.json` when `--golden` and `LIBRARY_GOLDEN`
+are not given. `benedict file --id` adds one line there for each filed question with wiki sources. A missing file
+is reported as `not_configured` and an unreadable line as `invalid` with its line number; neither stops the cycle.
+Each cycle also counts saved records not yet filed (`records.unfiled`) and removes shelf transcript days older than
+`LIBRARY_TRANSCRIPT_DAYS` (unset or `keep` removes nothing).
+
 ```bash
 python3 bin/evaluate.py --config /tmp/example-library/library.json --library main --golden examples/golden.jsonl
 python3 bin/publish_skills.py --config /tmp/example-library/library.json --library main \

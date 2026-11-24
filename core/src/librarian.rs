@@ -10,11 +10,92 @@ use std::{
 
 type Result<T> = std::result::Result<T, String>;
 
+/// Remove transcript day folders older than `LIBRARY_TRANSCRIPT_DAYS` (default keep).
+fn transcripts() -> Result<Value> {
+    let retention = std::env::var("LIBRARY_TRANSCRIPT_DAYS").unwrap_or_default();
+    let days = match retention.trim() {
+        "" | "keep" => None,
+        n => Some(
+            n.parse::<u64>()
+                .map_err(|_| "LIBRARY_TRANSCRIPT_DAYS must be a number of days or keep")?,
+        ),
+    };
+    let dir = crate::rooms::transcripts_dir();
+    let mut removed = vec![];
+    let mut folders = 0;
+    if dir.is_dir() {
+        let oldest = days.map(crate::rooms::day_folder);
+        let mut names: Vec<String> = std::fs::read_dir(&dir)
+            .map_err(|e| format!("transcripts: {e}"))?
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_dir())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.len() == 6 && n.chars().all(|c| c.is_ascii_digit()))
+            .collect();
+        names.sort();
+        for name in names {
+            // Day folders are YYMMDD, so string order is date order.
+            if oldest.as_ref().is_some_and(|o| name < *o) {
+                std::fs::remove_dir_all(dir.join(&name)).map_err(|e| format!("transcripts: {e}"))?;
+                removed.push(name);
+            } else {
+                folders += 1;
+            }
+        }
+    }
+    Ok(json!({"retention":days.map_or(json!("keep"), |d| json!(d)),"folders":folders,"removed":removed}))
+}
+
+/// The golden file is optional. Missing means skip; a bad line is reported, not fatal.
+fn golden_check(path: &Path) -> Option<Value> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(_) => return Some(json!({"status":"not_configured","golden":path})),
+    };
+    for (i, line) in text.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let ok = serde_json::from_str::<Value>(line).ok().is_some_and(|v| {
+            v["q"].as_str().is_some_and(|q| !q.trim().is_empty())
+                && (v["answer_doc"].is_string() || v["answer_doc"].is_array())
+        });
+        if !ok {
+            return Some(json!({"status":"invalid","golden":path,"line":i + 1}));
+        }
+    }
+    None
+}
+
 fn cycle(config: &Path, key: &str, golden: Option<&str>, backup_dir: Option<&str>) -> (Value, i32) {
     let mut row = json!({"library":key,"started":Utc::now().to_rfc3339_opts(SecondsFormat::Micros,false),"steps":{}});
+    // A golden file the operator names must exist; the default one is optional.
+    let named = golden.map(str::to_owned).or_else(|| {
+        std::env::var("LIBRARY_GOLDEN")
+            .ok()
+            .filter(|g| !g.trim().is_empty())
+    });
+    let default_golden = crate::rooms::data_dir()
+        .join("golden")
+        .join(format!("{key}.jsonl"))
+        .to_string_lossy()
+        .into_owned();
+    let golden = named.as_deref().unwrap_or(&default_golden);
     let work = (|| -> Result<i32> {
         row["steps"]["index"] = local::index(config, key)?;
-        let code = if let Some(golden) = golden {
+        row["steps"]["transcripts"] = transcripts()?;
+        if records::enabled() {
+            row["steps"]["records"] = json!({"unfiled":records::unfiled(key)?});
+        }
+        let skip = if named.is_some() {
+            None
+        } else {
+            golden_check(Path::new(golden))
+        };
+        let code = if let Some(status) = skip {
+            row["steps"]["golden"] = status;
+            1
+        } else {
             let (report, code) =
                 evaluation::run(config, Some(key), &["--golden".into(), golden.into()])?
                     .ok_or("configured wiki requires its policy-aware evaluator")?;
@@ -33,9 +114,6 @@ fn cycle(config: &Path, key: &str, golden: Option<&str>, backup_dir: Option<&str
             row["steps"]["golden"] =
                 json!({"exit":code,"golden":golden,"summary":report["summary"],"misses":misses});
             code
-        } else {
-            row["steps"]["golden"] = json!({"status":"not_configured"});
-            1
         };
         if let Some(dir) = backup_dir {
             let name = Utc::now().format("%Y%m%dT%H%M%S%6fZ").to_string();

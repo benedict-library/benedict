@@ -7,7 +7,7 @@ source_args=()
 answer_args=()
 progress=
 librarian=on
-given_database= given_memory= given_shelf= given_autostart=
+given_database= given_memory= given_shelf= given_autostart= given_transcripts=
 while [[ ${1:-} == --* ]]; do
   [[ -n ${2:-} ]] || { echo "$1 needs a value" >&2; exit 2; }
   case $1 in
@@ -31,6 +31,9 @@ while [[ ${1:-} == --* ]]; do
     --librarian)
       [[ $2 == on || $2 == off ]] || { echo 'expected --librarian on or off' >&2; exit 2; }
       librarian=$2 ;;
+    --transcript-days)
+      [[ $2 == keep || $2 =~ ^[1-9][0-9]*$ ]] || { echo 'expected --transcript-days keep or a number of days' >&2; exit 2; }
+      given_transcripts=$2 ;;
     --progress)
       [[ $2 == json ]] || { echo 'expected --progress json' >&2; exit 2; }
       progress=json ;;
@@ -46,7 +49,7 @@ while [[ ${1:-} == --* ]]; do
   shift 2
 done
 if (( $# < 1 || $# > 2 )); then
-  echo 'usage: bin/install-project [--start example|empty | --wiki DIR] [--database sqlite|postgres] [--database-secret-file FILE] [--memory SIZE] [--shelf DIR|none] [--autostart on|off] [--librarian on|off] [--progress json] EXISTING_WORKSPACE [CONFIRMED_COMPOSE_PROFILE.json]' >&2
+  echo 'usage: bin/install-project [--start example|empty | --wiki DIR] [--database sqlite|postgres] [--database-secret-file FILE] [--memory SIZE] [--shelf DIR|none] [--autostart on|off] [--librarian on|off] [--transcript-days N|keep] [--progress json] EXISTING_WORKSPACE [CONFIRMED_COMPOSE_PROFILE.json]' >&2
   exit 2
 fi
 repo=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
@@ -120,7 +123,7 @@ else
     project=benedict-$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')
   fi
 fi
-given=$given_database$given_memory$given_shelf$given_autostart
+given=$given_database$given_memory$given_shelf$given_autostart$given_transcripts
 if [[ -f $profile ]] && { (( ${#source_args[@]} + ${#answer_args[@]} )) || [[ -n $given ]]; }; then
   echo 'This project already has a profile. Use that profile or choose a new workspace.' >&2
   exit 2
@@ -241,7 +244,7 @@ if (( $# == 1 )) && [[ ! -e $profile ]]; then
   elif [[ -n $given_memory ]]; then
     answer_args+=(--memory "$memory")
   fi
-  answer_args+=(--autostart "${given_autostart:-on}")
+  answer_args+=(--autostart "${given_autostart:-on}" --transcript-days "${given_transcripts:-keep}")
   quiet docker run --rm --user "$(id -u):$(id -g)" -v "$stage:/settings" "$image" setup --project "$project" "${source_args[@]}" "${answer_args[@]}" --output /settings/profile.json
   mv -- "$stage/profile.json" "$profile"
 fi
@@ -288,6 +291,7 @@ limit=$(jq -r '.services.library.mem_limit // 0' "$profile")
 database=SQLite
 if jq -e '.services.library.environment.LIBRARY_DB_URL_FILE' "$profile" >/dev/null; then database=PostgreSQL; fi
 restart=$(jq -r '.services.room.restart // "no"' "$profile")
+transcripts=$(jq -r '.services.librarian.environment.LIBRARY_TRANSCRIPT_DAYS // "keep"' "$profile")
 emit "$(jq -cn --argjson steps "$steps" --argjson elapsed "$(( $(date +%s) - started ))" \
   --arg workspace "$workspace" --arg project "$project" --argjson documents "${documents:-null}" \
   --argjson memory "$limit" --arg database "$database" --arg restart "$restart" --arg librarian "$librarian" \
@@ -297,6 +301,7 @@ if [[ $progress != json ]]; then
   if [[ -n $wiki ]]; then from="your wiki $wiki ($pages pages)"; else from=${source_args[1]:-the existing profile}; fi
   if [[ $librarian == on ]]; then keeper='running: rebuilds the index once a day'; else keeper=off; fi
   if [[ $restart == no ]]; then reboot='start it yourself'; else reboot='starts again by itself'; fi
+  if [[ $transcripts == keep ]]; then kept='kept on the shelf'; else kept="kept on the shelf for $transcripts days"; fi
   cat <<SUMMARY
   Started from      $from
   Indexed           ${documents:-?} documents in $(( $(date +%s) - started ))s
@@ -304,8 +309,9 @@ if [[ $progress != json ]]; then
   Database          $database
   Librarian         $keeper
   After a reboot    $reboot
+  Conversations     $kept
   Log               $log
 To change a choice, install into a new project folder with --memory SIZE, --database postgres
---database-secret-file FILE, --shelf DIR, --autostart off or --librarian off.
+--database-secret-file FILE, --shelf DIR, --autostart off, --librarian off or --transcript-days N.
 SUMMARY
 fi

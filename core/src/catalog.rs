@@ -209,14 +209,86 @@ fn word(c: char) -> bool {
     c.is_ascii_alphanumeric() || ('가'..='힣').contains(&c)
 }
 
-fn save(
-    config: &Path,
-    key: Option<&str>,
-    args: &mut Vec<String>,
-    record_observation: bool,
-) -> Result<Value> {
+/// `--turns FILE:A-B` or `FILE:A..FILE:B` names the first and last transcript lines.
+fn turns(text: &str) -> Result<String> {
+    let point = |p: &str| -> Result<(String, u64)> {
+        let (file, line) = p.rsplit_once(':').ok_or("turns need FILE:LINE")?;
+        let (day, name) = file.split_once('/').ok_or("turns file is DAY/LIBRARY-ROOM.jsonl")?;
+        if day.len() != 6
+            || !day.chars().all(|c| c.is_ascii_digit())
+            || !name.ends_with(".jsonl")
+            || name.contains('/')
+            || name.starts_with('.')
+        {
+            return Err("turns file is DAY/LIBRARY-ROOM.jsonl".into());
+        }
+        let line: u64 = line.parse().map_err(|_| "turns line must be a number")?;
+        if line == 0 {
+            return Err("turns lines start at 1".into());
+        }
+        Ok((file.to_owned(), line))
+    };
+    let (first, last) = if let Some((a, b)) = text.split_once("..") {
+        (point(a)?, point(b)?)
+    } else {
+        let (file, range) = text.rsplit_once(':').ok_or("turns need FILE:LINE")?;
+        let (a, b) = range.split_once('-').unwrap_or((range, range));
+        (point(&format!("{file}:{a}"))?, point(&format!("{file}:{b}"))?)
+    };
+    if first.0 == last.0 && first.1 > last.1 {
+        return Err("turns range ends before it starts".into());
+    }
+    Ok(json!([{"file":first.0,"line":first.1},{"file":last.0,"line":last.1}]).to_string())
+}
+
+/// An agent's summary of finished work becomes one database record. Only the
+/// librarian files it into the wiki, with `file --id`.
+fn save(config: &Path, key: Option<&str>, args: &mut Vec<String>) -> Result<Value> {
     let refs = option(args, "--refs")?.unwrap_or_default();
     let query = option(args, "--query")?.unwrap_or_default();
+    let session = option(args, "--session")?.unwrap_or_default();
+    let turns = match option(args, "--turns")? {
+        Some(text) => turns(&text)?,
+        None => String::new(),
+    };
+    if args.first().is_some_and(|s| s == "--") {
+        args.remove(0);
+    }
+    let [question, answer] = args.as_slice() else {
+        return Err("save needs question and answer".into());
+    };
+    if question.trim().is_empty() || answer.trim().is_empty() {
+        return Err("question and answer must contain text".into());
+    }
+    if !records::enabled() {
+        return Err("save keeps a record in the room database; configure one with setup".into());
+    }
+    let key = local::selection(config, key)?.0;
+    local::verify_references(config, &key, &refs)?;
+    let extra = records::Extra {
+        session: &session,
+        turns: &turns,
+        kind: "record",
+    };
+    let record = records::store_with(&key, "librarian", question, &query, answer, &refs, &extra)?;
+    Ok(json!({"saved":true,"library":key,"record_id":record["id"],"kind":"record"}))
+}
+
+/// Write or update the filing page for a question. `file --id` and archival
+/// receipts call this; `save` does not.
+pub fn file_page(
+    config: &Path,
+    key: Option<&str>,
+    question: &str,
+    answer: &str,
+    refs: &str,
+) -> Result<Value> {
+    let mut args = vec![format!("--refs={refs}"), question.into(), answer.into()];
+    write_page(config, key, &mut args)
+}
+
+fn write_page(config: &Path, key: Option<&str>, args: &mut Vec<String>) -> Result<Value> {
+    let refs = option(args, "--refs")?.unwrap_or_default();
     if args.first().is_some_and(|s| s == "--") {
         args.remove(0);
     }
@@ -302,19 +374,6 @@ fn save(
         }
     }
     let mut bytes = previous.as_deref().unwrap_or("").len();
-    // Preserve the evidence before publishing the wiki page.
-    let record = if record_observation && records::enabled() {
-        Some(records::store(
-            &key,
-            "librarian",
-            question,
-            &query,
-            answer,
-            &refs,
-        )?)
-    } else {
-        None
-    };
     if changed {
         let lowered = question.to_lowercase();
         let mut tags = Vec::new();
@@ -353,11 +412,7 @@ fn save(
         writeln!(f, "\n## [{day}] query | {question}").map_err(io)?;
     }
     local::refresh(config, &key, Some(&page))?;
-    let mut result = json!({"saved":true,"path":relative,"library":key,"bytes":bytes,"learning":"not configured"});
-    if let Some(record) = record {
-        result["record_id"] = record["id"].clone();
-    }
-    Ok(result)
+    Ok(json!({"saved":true,"path":relative,"library":key,"bytes":bytes,"learning":"not configured"}))
 }
 
 /// The archival receipt title is machine-generated. The search room owns the actual
@@ -371,7 +426,7 @@ pub fn file_receipt(config: &Path, key: &str, title: &str, body: &str, url: &str
             .is_dir()
         && env::var_os("LIBRARY_EMBED_URL").is_none()
     {
-        return save(config, Some(key), &mut args, false);
+        return write_page(config, Some(key), &mut args);
     }
     let out = std::process::Command::new("python3")
         .env_remove("BENEDICT_CLI")
@@ -398,7 +453,7 @@ pub fn run(cmd: &str, config: &Path, key: Option<&str>, args: &[String]) -> Resu
         if root.join(".wiki-pending").is_dir() || env::var_os("LIBRARY_EMBED_URL").is_some() {
             return Ok(None);
         }
-        return save(config, key, &mut args, true).map(Some);
+        return save(config, key, &mut args).map(Some);
     }
     change_registry(cmd, config, &mut args).map(Some)
 }
