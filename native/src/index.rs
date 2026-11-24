@@ -1,5 +1,5 @@
 //! A room's lexical index held in Rust: for each word its postings (document, count), for each document its
-//! length and words. BM25 scores are the same sums `rooms/room_query.py` makes over its Python dictionaries, in the
+//! length and words. BM25 scores are the same sums the room's Python dictionaries gave, in the
 //! same word order, so the ranking does not change; the memory is a few bytes a pair instead of a dictionary entry.
 
 use std::collections::HashMap;
@@ -83,7 +83,7 @@ impl Index {
         self.doc_id.contains_key(path)
     }
 
-    /// BM25 over `words` in the given order (room_query.py: idf = ln(1 + (N - df + .5)/(df + .5)), length capped at
+    /// BM25 over `words` in the given order (as the Python dictionaries: idf = ln(1 + (N - df + .5)/(df + .5)), length capped at
     /// three times the average). Documents with a positive score, in no particular order.
     pub fn bm25(&self, words: &[&str], nd: f64, k1: f64, b: f64, avg: f64) -> Vec<(u32, f64)> {
         let mut score: HashMap<u32, f64> = HashMap::new();

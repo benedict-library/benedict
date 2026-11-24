@@ -15,7 +15,7 @@ row = {'key':'demo','wiki_root':str(root/'wiki'),'save_block':data['rules'],
        'options':{'web_shelf':str(root/'shelf') if data['shelf'] else None, 'web_block':data['web_rules']}}
 if data['writer']: row['options']['web_save_cmd'] = provider+' '+data['writer']
 web.save_query.load_row = lambda _:row
-web.search.settings = lambda:{'LIBRARY_WEB_SEARCH_CMD': provider+' find' if data['configured'] else None}
+web.common.settings = lambda:{'LIBRARY_WEB_SEARCH_CMD': provider+' find' if data['configured'] else None}
 web.MAX_BYTES = data['limit']
 start = datetime.datetime.fromisoformat(data['start'])
 ticks = iter([start])

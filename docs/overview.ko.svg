@@ -11,7 +11,7 @@
 <rect x="44" y="104" width="196" height="54" rx="8" fill="#FFFFFF" stroke="#8C959F"/><text x="56" y="124" font-size="13" font-weight="600" fill="#1F2328">사람</text><text x="56" y="142" font-size="11" fill="#57606A">대화창·웹 화면·메신저</text>
 <rect x="44" y="174" width="196" height="54" rx="8" fill="#FFFFFF" stroke="#8C959F"/><text x="56" y="194" font-size="13" font-weight="600" fill="#1F2328">에이전트</text><text x="56" y="212" font-size="11" fill="#57606A">어떤 CLI·서비스든</text>
 <rect x="300" y="48" width="300" height="84" rx="14" fill="#F6F8FA" stroke="#D0D7DE"/>
-<text x="320" y="78" font-size="16" font-weight="700" fill="#1F2328">검색 — bin/search.py</text>
+<text x="320" y="78" font-size="16" font-weight="700" fill="#1F2328">검색 — benedict search</text>
 <text x="320" y="102" font-size="12" fill="#57606A">읽을 수 있는 모든 도서관, 또는 하나</text>
 <rect x="300" y="164" width="300" height="220" rx="14" fill="#F6F8FA" stroke="#D0D7DE"/>
 <text x="320" y="194" font-size="16" font-weight="700" fill="#1F2328">실 — 메모리 + DB</text>

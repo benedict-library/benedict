@@ -28,7 +28,8 @@ const HELP: &str = "Benedict — a library for agents and personas
   setup        configure Docker storage, database and memory limits
   init | add   create a central or project library
   index        rebuild the wiki search index
-  search       search a library; --question TEXT preserves the user's exact words
+  search       search a library and the libraries it may read; --question TEXT preserves the user's
+               exact words, --web adds the configured web step
   read         read a wiki page or shelf:PATH (original UTF-8 text and SHA-256)
   file         promote an answered room record into the wiki with --id ID
   save         file a question, answer and --refs; --query TEXT keeps the search terms
@@ -51,7 +52,9 @@ fn usage(cmd: &str) -> Option<&'static str> {
         "add" => "add [--config PATH] --key KEY [--name NAME]",
         "index" => "index [--library KEY] [--config PATH]",
         "method" => "method [--lang en|ko]",
-        "search" => "search [--config PATH] [--library KEY] [--top N] [--question ORIGINAL] QUERY",
+        "search" => {
+            "search [--config PATH] [--library KEY] [--top N] [--question ORIGINAL] [--web] QUERY"
+        }
         "read" => {
             "read [--config PATH] [--library KEY] [--question ORIGINAL] [--pages 3-5] WIKI_PAGE.md|shelf:RELATIVE_PATH"
         }
@@ -233,6 +236,14 @@ fn run() -> Result<i32, String> {
             println!("{value}");
             return Ok(code);
         }
+    }
+    if cmd == "search"
+        && args
+            .iter()
+            .take_while(|v| v.as_str() != "--")
+            .any(|v| v == "--web")
+    {
+        return Err("--web requires a native registry".into());
     }
     // Preserve explicit user evidence when advanced policy requires a legacy handler.
     let evidence_flag = match cmd.as_str() {

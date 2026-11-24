@@ -26,7 +26,7 @@ def _load(name):
     return mod
 
 
-search = _load("search")
+common = _load("common")
 save_query = _load("save_query")
 
 
@@ -37,7 +37,7 @@ def send(cfg, title, body):
         return 0, "보고 보내기: 설정 안 됨 (LIBRARY_REPORT_CMD) — 서류철에만 남겼다"
     timeout = float(cfg.get("LIBRARY_REPORT_TIMEOUT") or 60)
     try:
-        r = subprocess.run(search.split_cmd(cmd), input=body, text=True, capture_output=True, timeout=timeout,
+        r = subprocess.run(common.split_cmd(cmd), input=body, text=True, capture_output=True, timeout=timeout,
                            env={**os.environ, "LIBRARY_REPORT_TITLE": title})
     except subprocess.TimeoutExpired:
         return 124, f"보고 보내기 실패: {timeout:g}초 안에 끝나지 않음"
@@ -66,7 +66,7 @@ def main(argv):
     if len(argv) not in (3, 4):
         raise SystemExit(__doc__)
     body = Path(argv[3]).read_text(encoding="utf-8") if len(argv) == 4 else sys.stdin.read()
-    code, lines = run(save_query.load_row(argv[1]), argv[2], body, search.settings())
+    code, lines = run(save_query.load_row(argv[1]), argv[2], body, common.settings())
     for line in lines:
         print(line, file=sys.stdout if code == 0 else sys.stderr)
     return code

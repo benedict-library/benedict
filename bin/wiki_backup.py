@@ -209,5 +209,5 @@ def main():
 
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    import search  # noqa: E402  (records the use; see search.traced)
-    sys.exit(search.traced("librarian", main))
+    import common  # noqa: E402  (records the use; see common.traced)
+    sys.exit(common.traced("librarian", main))

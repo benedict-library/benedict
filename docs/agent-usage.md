@@ -7,7 +7,7 @@ local data directory. Never substitute a production root while testing.
 
 ## Working from Docker
 
-Start with the [setup interview](docker-setup.md). In the activated project use `benedict search` to find documents, `benedict read shelf:river-field-note.md` to open the sample original, and `benedict file --id RECORD` to file an answered observation with its evidence. A librarian agent compares sources and records the synthesis with `benedict record --room librarian --question TITLE --answer SYNTHESIS --source REFERENCES`. Publish its encyclopedia page with `benedict file --id RECORD --as concept`. Use the same library for both commands. The maintenance command refreshes the index and reports retrieval checks. [External work and the courier](courier.md) · [The public square](plaza.md)
+Start with the [setup interview](docker-setup.md). In the activated project use `benedict search` to find documents, `benedict read shelf:river-field-note.md` to open the sample original, and `benedict file --id RECORD` to file an answered observation with its evidence. A librarian agent compares sources and records the synthesis with `benedict record --room librarian --question TITLE --answer SYNTHESIS --source REFERENCES`. Publish its encyclopedia page with `benedict file --id RECORD --as concept`. Use the same library for both commands. The maintenance command refreshes the index and reports retrieval checks. Without `--library`, `benedict search` also lists under `near` the top hits of each library the central library `reads`. A library whose index is missing or damaged is searched in its files directly, and `fallback` says so. `--web` adds the deployment's web step after the inside results ([portability](portability.md)). [External work and the courier](courier.md) · [The public square](plaza.md)
 
 ## File/index compatibility path
 
@@ -61,15 +61,13 @@ not proof that a human approved a change. Keep question/input/status/reply in th
 private conversation memory. Stop each example room with `bin/room.py stop <room>` when its work ends; subsequent
 `start` restores trusted snapshot state. Do not stop rooms belonging to another task.
 
-For existing search/read clients, configure the same local runtime explicitly (replace `/path/to/library` with the
+For the reading client, configure the same local runtime explicitly (replace `/path/to/library` with the
 checkout location; no external host is implied):
 
 ```bash
 export LIBRARY_ROOM_CMD='python3 /path/to/library/bin/room.py exec'
 export LIBRARY_REGISTRY_ROOM=main-search
-export LIBRARY_ROOM_LIB=/path/to/library/runtime
 export LIBRARY_SEARCH_ENV=/tmp/example-library/no-deployment-settings.env
-python3 bin/search.py --library main refund
 python3 bin/read.py --library main --var refund --q "14 days" entities/refund.md
 ```
 

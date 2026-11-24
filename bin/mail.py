@@ -7,7 +7,7 @@ usage: mail.py [--room ROOM] put <topic> [file]      put the file (or stdin) und
 
 The mailbox is the room variable `mail` = {topic: [{"from", "at", "text"}]}. Answers survive sessions and time gaps
 because they sit in the room, not in a conversation. The room is --room, else LIBRARY_MAIL_ROOM. Rooms are reached
-the way bin/search.py reaches them (LIBRARY_ROOM_EXEC, LIBRARY_ROOM_CMD from the environment or search.env); without
+through bin/common.py (LIBRARY_ROOM_EXEC, LIBRARY_ROOM_CMD from the environment or search.env); without
 LIBRARY_ROOM_CMD the bundled bin/room.py runs rooms on this machine (LIBRARY_ROOM_HOME).
 """
 import base64
@@ -19,9 +19,9 @@ import socket
 import sys
 
 HERE = Path(__file__).resolve().parent
-_spec = importlib.util.spec_from_file_location("_library_search", HERE / "search.py")
-search = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(search)
+_spec = importlib.util.spec_from_file_location("_library_common", HERE / "common.py")
+common = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(common)
 
 PUT = """import base64, datetime
 mail = globals().setdefault('mail', {{}})
@@ -75,7 +75,7 @@ def main(argv):
             room = value
         else:
             os.environ["LIBRARY_MAIL_FROM"] = value
-    cfg = search.settings()
+    cfg = common.settings()
     room = room or cfg.get("LIBRARY_MAIL_ROOM")
     try:
         if not room:
@@ -85,7 +85,7 @@ def main(argv):
         print(error, file=sys.stderr)
         return 2
     cfg.setdefault("LIBRARY_ROOM_CMD", shlex.join([sys.executable, str(HERE / "room.py"), "exec"]))
-    rc, out, err = search.room_exec(cfg, room, code, 60, 120)
+    rc, out, err = common.room_exec(cfg, room, code, 60, 120)
     sys.stdout.write(out)
     if rc:
         print(f"회신함 실 {room} 실패 rc={rc}: {err.strip()[:200]}", file=sys.stderr)
@@ -93,4 +93,4 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(search.traced("meeting", lambda: main(sys.argv)))
+    sys.exit(common.traced("meeting", lambda: main(sys.argv)))

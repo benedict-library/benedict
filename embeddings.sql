@@ -1,4 +1,4 @@
--- Vector table for optional hybrid search (bin/embed_sync.py writes it, rooms/room_query.py reads it).
+-- Vector table for optional hybrid search (bin/embed_sync.py writes it for a deployment's room search).
 -- One row per document (doc_path = absolute path) or per 1,000-character piece ('<path>::c<n>').
 -- Apply: psql "$LIBRARY_PG_DSN" -v ON_ERROR_STOP=1 -f embeddings.sql   (idempotent; needs the pgvector extension)
 -- The dimension must match LIBRARY_EMBED_DIM (default 768).

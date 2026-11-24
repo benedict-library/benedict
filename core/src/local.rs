@@ -338,17 +338,9 @@ impl EvaluationCorpus {
     }
 }
 
-fn build_index(reg: &Registry, key: &str) -> Result<Value> {
-    use tempfile::NamedTempFile;
-    let path = reg.index_path(key);
-    let parent = path.parent().unwrap();
-    crate::files::no_link(parent)?;
-    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    let lock_path = path.with_extension("lock");
-    crate::files::no_link(&lock_path)?;
-    let _lock = crate::files::lock(&lock_path)?;
-    let root = reg.root(key)?;
-    let docs = documents(reg, key, &root)?;
+/// The index record of the library's documents as they are now.
+fn fresh_record(reg: &Registry, key: &str, root: &Path) -> Result<Value> {
+    let docs = documents(reg, key, root)?;
     let mut counts = BTreeMap::new();
     let mut lengths = BTreeMap::new();
     for (path, body) in &docs {
@@ -360,7 +352,24 @@ fn build_index(reg: &Registry, key: &str) -> Result<Value> {
         counts.insert(path, counter);
     }
     let indexed_at = Utc::now().to_rfc3339_opts(SecondsFormat::Micros, false);
-    let record = json!({"version":1,"root":root,"shelf_root":reg.shelf_root(key)?,"indexed_at":indexed_at,"documents":docs,"counts":counts,"lengths":lengths});
+    Ok(
+        json!({"version":1,"root":root,"shelf_root":reg.shelf_root(key)?,"indexed_at":indexed_at,"documents":docs,"counts":counts,"lengths":lengths}),
+    )
+}
+
+fn build_index(reg: &Registry, key: &str) -> Result<Value> {
+    use tempfile::NamedTempFile;
+    let path = reg.index_path(key);
+    let parent = path.parent().unwrap();
+    crate::files::no_link(parent)?;
+    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let lock_path = path.with_extension("lock");
+    crate::files::no_link(&lock_path)?;
+    let _lock = crate::files::lock(&lock_path)?;
+    let root = reg.root(key)?;
+    let record = fresh_record(reg, key, &root)?;
+    let documents = record["documents"].as_object().map_or(0, Map::len);
+    let indexed_at = record["indexed_at"].clone();
     let mut tmp = NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
     serde_json::to_writer(&mut tmp, &record).map_err(|e| e.to_string())?;
     tmp.flush()
@@ -368,7 +377,7 @@ fn build_index(reg: &Registry, key: &str) -> Result<Value> {
         .map_err(|e| e.to_string())?;
     tmp.persist(path).map_err(|e| e.to_string())?;
     Ok(
-        json!({"library":key,"documents":docs.len(),"engine":"lexical-bm25","persistent":true,"indexed_at":indexed_at}),
+        json!({"library":key,"documents":documents,"engine":"lexical-bm25","persistent":true,"indexed_at":indexed_at}),
     )
 }
 
@@ -402,12 +411,27 @@ pub fn refresh(config: &Path, key: &str, path: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
+/// One library's hits from its prebuilt index. When that index is missing, damaged or made for other files, the
+/// library's documents are read now and ranked the same way; `fallback` says why, and `indexed_at` is null.
 fn search_one(reg: &Registry, key: &str, query: &str, top: usize) -> Result<Value> {
     let root = reg.root(key)?;
     let words: BTreeSet<_> = words(query).collect();
     if words.is_empty() {
         return Err("query must contain a word".into());
     }
+    match stored_record(reg, key, &root).and_then(|record| rank(reg, key, &record, &words, top))
+    {
+        Ok(result) => Ok(result),
+        Err(reason) => {
+            let mut result = rank(reg, key, &fresh_record(reg, key, &root)?, &words, top)?;
+            result["indexed_at"] = Value::Null;
+            result["fallback"] = json!(format!("{reason}; searched the wiki files directly"));
+            Ok(result)
+        }
+    }
+}
+
+fn stored_record(reg: &Registry, key: &str, root: &Path) -> Result<Value> {
     let path = reg.index_path(key);
     if !path.is_file() {
         return Err("prebuilt index missing; run index or librarian before search".into());
@@ -419,6 +443,16 @@ fn search_one(reg: &Registry, key: &str, query: &str, top: usize) -> Result<Valu
     {
         return Err("index does not match selected library; rebuild index".into());
     }
+    Ok(record)
+}
+
+fn rank(
+    reg: &Registry,
+    key: &str,
+    record: &Value,
+    words: &BTreeSet<String>,
+    top: usize,
+) -> Result<Value> {
     let invalid = "invalid index; rebuild index";
     let docs = record["documents"].as_object().ok_or(invalid)?;
     let counts = record["counts"].as_object().ok_or(invalid)?;
@@ -446,7 +480,7 @@ fn search_one(reg: &Registry, key: &str, query: &str, top: usize) -> Result<Valu
         let length = lengths.get(path).and_then(Value::as_u64).ok_or(invalid)? as f64;
         total += length;
         let mut matches = Vec::new();
-        for word in &words {
+        for word in words {
             let found = match stems.get(word) {
                 Some(stem) => prefixed(counter, stem).ok_or(invalid)?,
                 None => match counter.get(word) {
@@ -633,6 +667,7 @@ pub fn run(cmd: &str, args: &[String]) -> Result<Option<i32>> {
     let mut pages = None;
     let mut pos = Vec::new();
     let mut literal = false;
+    let mut web = false;
     let mut args = args.iter();
     while let Some(s) = args.next() {
         if literal {
@@ -658,6 +693,7 @@ pub fn run(cmd: &str, args: &[String]) -> Result<Option<i32>> {
                 .ok_or_else(|| format!("{opt} requires a value"))
         };
         match (cmd, opt) {
+            ("search", "--web") if val.is_none() => web = true,
             ("method", "--lang") => lang = value()?,
             ("index" | "search" | "read", "--config") => config = value()?,
             ("index" | "search" | "read", "--library") => key = Some(value()?),
@@ -706,7 +742,12 @@ pub fn run(cmd: &str, args: &[String]) -> Result<Option<i32>> {
             for other in reads.iter().filter_map(Value::as_str) {
                 let mut row = json!({"library":other,"name":reg.rows[other].get("name").unwrap_or(&json!(other))});
                 match search_one(&reg, other, pos[0], 3) {
-                    Ok(h) => row["hits"] = h["hits"].clone(),
+                    Ok(h) => {
+                        row["hits"] = h["hits"].clone();
+                        if let Some(why) = h.get("fallback") {
+                            row["fallback"] = why.clone();
+                        }
+                    }
                     Err(e) => row["error"] = json!(e),
                 }
                 near.push(row);
@@ -756,6 +797,79 @@ pub fn run(cmd: &str, args: &[String]) -> Result<Option<i32>> {
             _ => {}
         }
     }
+    let mut code = 0;
+    if web {
+        let (step, rc) = web_step(name, pos[0])?;
+        output["web"] = step;
+        code = rc;
+    }
     println!("{output}");
-    Ok(Some(0))
+    Ok(Some(code))
+}
+
+/// The web step after the inside results. LIBRARY_WEB_CMD is a shell command line; it receives the library key and
+/// the search terms as two more arguments and nothing else. Without it nothing leaves the library and the step says
+/// how an agent keeps a public source it found itself.
+fn web_step(key: &str, query: &str) -> Result<(Value, i32)> {
+    use std::io::{Read, Seek};
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+    let Some(cmd) = std::env::var("LIBRARY_WEB_CMD")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+    else {
+        let next = format!(
+            "LIBRARY_WEB_CMD is not set, so nothing left the library. Find public sources with your own web search \
+             tool, then keep each one with: benedict web-source --library {key} PUBLIC_QUERY SOURCE_URL"
+        );
+        return Ok((json!({"library":key,"configured":false,"next":next}), 1));
+    };
+    let limit = match std::env::var("LIBRARY_WEB_TIMEOUT") {
+        Ok(s) => s
+            .trim()
+            .parse::<u64>()
+            .map_err(|_| "LIBRARY_WEB_TIMEOUT must be whole seconds")?,
+        Err(_) => 540,
+    };
+    let io = |e: std::io::Error| format!("web step: {e}");
+    let mut out = tempfile::tempfile().map_err(io)?;
+    let mut err = tempfile::tempfile().map_err(io)?;
+    let mut child = Command::new("sh")
+        .arg("-c")
+        .arg(format!("{cmd} \"$@\""))
+        .arg("sh")
+        .arg(key)
+        .arg(query)
+        .stdin(Stdio::null())
+        .stdout(out.try_clone().map_err(io)?)
+        .stderr(err.try_clone().map_err(io)?)
+        .spawn()
+        .map_err(io)?;
+    let deadline = Instant::now() + Duration::from_secs(limit);
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(io)? {
+            break Some(status);
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    let text = |file: &mut fs::File| -> Result<String> {
+        let mut bytes = Vec::new();
+        file.rewind().map_err(io)?;
+        file.read_to_end(&mut bytes).map_err(io)?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
+    };
+    let (stdout, stderr) = (text(&mut out)?, text(&mut err)?);
+    let code = status.map_or(124, |s| s.code().unwrap_or(1));
+    let mut step = json!({"library":key,"configured":true,"exit_code":code,"output":stdout});
+    if status.is_none() {
+        step["error"] = json!(format!("web step stopped after {limit} seconds"));
+    } else if !stderr.trim().is_empty() {
+        step["error"] = json!(stderr.trim());
+    }
+    Ok((step, code))
 }
