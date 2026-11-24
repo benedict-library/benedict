@@ -50,6 +50,8 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and sets `filed_at`. Running it again fills only what is missing.
 - The compose librarian no longer passes the example golden file; only the example start points
   `LIBRARY_GOLDEN` at it.
+- An upgrade replaces the bundled skill page (`entities/skill_benedict-library.md`) when it is the page an
+  earlier version wrote. An edited page stops the installer with a message that says how to keep it.
 - `install-project` asks only where the library starts. For your own wiki it uses SQLite without a
   shelf, starts the librarian, turns autostart on and sets the memory limit from the wiki size with
   `setup --recommend-memory` (measured: about 20,000 pages fit in 2 GiB, about 40,000 in 3 GiB; at most
