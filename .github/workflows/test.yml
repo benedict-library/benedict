@@ -22,7 +22,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # macOS arm64 runners repeatedly went unassigned for capacity; the Intel pool runs the
+        # same macOS checks (paths, sockets, shells) until the image retires in fall 2027.
+        os: [ubuntu-latest, macos-15-intel, windows-latest]
         python: ["3.12"]
         include:
           - os: ubuntu-latest
