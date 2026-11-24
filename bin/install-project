@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # Activate an isolated library and register its entry point in the adopter's workspace.
-set -euo pipefail
+# Only the starting material is asked. Every other choice has a default that the summary shows,
+# and the checks below ask only when they find something the user must decide.
+set -Eeuo pipefail
 source_args=()
 answer_args=()
-# Each answer to a setup question travels to setup unchanged; setup asks the next missing question.
+progress=
+librarian=on
+given_database= given_memory= given_shelf= given_autostart=
 while [[ ${1:-} == --* ]]; do
   [[ -n ${2:-} ]] || { echo "$1 needs a value" >&2; exit 2; }
   case $1 in
@@ -15,31 +19,88 @@ while [[ ${1:-} == --* ]]; do
       source_args+=(--wiki "$(cd -- "$2" && pwd -P)") ;;
     --database)
       [[ $2 == sqlite || $2 == postgres ]] || { echo 'expected --database sqlite or postgres' >&2; exit 2; }
-      answer_args+=(--database "$2") ;;
+      given_database=$2 ;;
     --database-secret-file)
       [[ -f $2 ]] || { echo 'select an existing database secret file' >&2; exit 2; }
       answer_args+=(--database-secret-file "$(cd -- "$(dirname -- "$2")" && pwd -P)/$(basename -- "$2")") ;;
     --memory)
-      answer_args+=(--memory "$2") ;;
+      given_memory=$2 ;;
     --autostart)
       [[ $2 == on || $2 == off ]] || { echo 'expected --autostart on or off' >&2; exit 2; }
-      answer_args+=(--autostart "$2") ;;
+      given_autostart=$2 ;;
+    --librarian)
+      [[ $2 == on || $2 == off ]] || { echo 'expected --librarian on or off' >&2; exit 2; }
+      librarian=$2 ;;
+    --progress)
+      [[ $2 == json ]] || { echo 'expected --progress json' >&2; exit 2; }
+      progress=json ;;
     --shelf)
       if [[ $2 == none ]]; then
-        answer_args+=(--shelf none)
+        given_shelf=none
       else
         [[ -d $2 ]] || { echo 'select an existing shelf folder, or --shelf none' >&2; exit 2; }
-        answer_args+=(--shelf "$(cd -- "$2" && pwd -P)")
+        given_shelf=$(cd -- "$2" && pwd -P)
       fi ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
   shift 2
 done
 if (( $# < 1 || $# > 2 )); then
-  echo 'usage: bin/install-project [--start example|empty | --wiki DIR] [--database sqlite|postgres] [--database-secret-file FILE] [--memory SIZE] [--shelf DIR|none] [--autostart on|off] EXISTING_WORKSPACE [CONFIRMED_COMPOSE_PROFILE.json]' >&2
+  echo 'usage: bin/install-project [--start example|empty | --wiki DIR] [--database sqlite|postgres] [--database-secret-file FILE] [--memory SIZE] [--shelf DIR|none] [--autostart on|off] [--librarian on|off] [--progress json] EXISTING_WORKSPACE [CONFIRMED_COMPOSE_PROFILE.json]' >&2
   exit 2
 fi
 repo=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
+
+# Progress. A terminal sees one line per step with a running clock; other output streams see one
+# line when a step starts and one when it ends. --progress json prints one JSON event per line on
+# standard output instead. Docker's own output goes to the installation log either way.
+steps=6 step=0 step_id= step_label= step_started=$(date +%s) started=$(date +%s) log=/dev/null
+if [[ $progress == json ]]; then exec 3>&1 1>&2; fi
+tty=0
+if [[ $progress != json && -t 1 ]]; then tty=1; fi
+emit() { if [[ $progress == json ]]; then printf '%s\n' "$1" >&3; fi; }
+say() { if [[ $progress != json ]]; then printf '%s\n' "$*"; fi; }
+ended() {
+  if [[ $progress == json || $step == 0 ]]; then return 0; fi
+  local took=$(( $(date +%s) - step_started ))
+  if (( tty )); then printf '\r\033[2K[%d/%d] %s · %ds ✓\n' "$step" "$steps" "$step_label" "$took"
+  else printf '[%d/%d] %s done (%ds)\n' "$step" "$steps" "$step_label" "$took"; fi
+}
+begin() {
+  ended
+  step=$((step + 1)) step_id=$1 step_label=$2 step_started=$(date +%s)
+  emit "$(jq -cn --argjson step "$step" --argjson steps "$steps" --arg id "$1" --arg text "$2" \
+    --argjson elapsed "$(( $(date +%s) - started ))" \
+    '{event:"step",step:$step,steps:$steps,id:$id,label:$text,elapsed:$elapsed}')"
+  if [[ $progress != json ]] && (( ! tty )); then printf '[%d/%d] %s ...\n' "$step" "$steps" "$2"; fi
+  return 0
+}
+# Run a command with its output in the log; on a terminal, show the step's clock while it runs.
+quiet() {
+  if (( ! tty )); then "$@" >>"$log" 2>&1; return; fi
+  "$@" >>"$log" 2>&1 &
+  local pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    printf '\r\033[2K[%d/%d] %s · %ds' "$step" "$steps" "$step_label" "$(( $(date +%s) - step_started ))"
+    sleep 1
+  done
+  wait "$pid"
+}
+reason() { grep -v -E '^[[:space:]]*$|^ *(Container|Network|Volume) |^#[0-9]|^\[\+\]|^==' "$log" 2>/dev/null | tail -n 1 | cut -c1-200; }
+stop() {
+  local rc=$1 why=$2
+  emit "$(jq -cn --argjson step "$step" --arg id "$step_id" --argjson exit "$rc" --arg reason "$why" \
+    '{event:"error",step:$step,id:$id,exit:$exit,reason:$reason}')"
+  if [[ $progress != json ]]; then
+    if (( tty )); then printf '\r\033[2K'; fi
+    printf '[%d/%d] %s stopped (exit %d)\n' "$step" "$steps" "$step_label" "$rc" >&2
+    if [[ -n $why ]]; then printf '  %s\n' "$why" >&2; fi
+    if [[ $log != /dev/null ]]; then printf '  Full log: %s\n' "$log" >&2; fi
+  fi
+  exit "$rc"
+}
+trap 'rc=$?; trap - ERR; stop "$rc" "$(reason)"' ERR
+
 workspace=$(cd -- "$1" && pwd -P)
 if [[ $workspace == / || $workspace == "$(cd ~ && pwd -P)" ]]; then
   echo 'select a project directory' >&2; exit 2
@@ -59,7 +120,8 @@ else
     project=benedict-$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')
   fi
 fi
-if [[ -f $profile ]] && (( ${#source_args[@]} + ${#answer_args[@]} )); then
+given=$given_database$given_memory$given_shelf$given_autostart
+if [[ -f $profile ]] && { (( ${#source_args[@]} + ${#answer_args[@]} )) || [[ -n $given ]]; }; then
   echo 'This project already has a profile. Use that profile or choose a new workspace.' >&2
   exit 2
 fi
@@ -73,11 +135,15 @@ if [[ ! -f $profile && ${#source_args[@]} -eq 0 ]]; then
        source_args=(--wiki "$(cd -- "$answer" && pwd -P)") ;;
   esac
 fi
+wiki=
+if [[ ${source_args[0]:-} == --wiki ]]; then wiki=${source_args[1]}; fi
 mkdir -p -- "$state"
 if [[ ! -e $state/.gitignore && ! -L $state/.gitignore ]]; then printf '*\n' >"$state/.gitignore"; fi
 mkdir -- "$state/install.lock" || { echo 'another installation holds the project lock' >&2; exit 1; }
 stage=$state/install.lock
 trap 'rm -f -- "$stage/library" "$stage/AGENTS.md" "$stage/CLAUDE.md" "$stage/GEMINI.md" "$stage/profile.json"; rmdir -- "$stage"' EXIT
+log=$state/install.log
+printf '\n== %s install-project\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$log"
 image=${LIBRARY_IMAGE:-$project-library}
 base=$repo/compose.yaml
 start='<!-- Benedict project instructions -->'
@@ -122,19 +188,124 @@ if [[ -L $state/library || ( -e $state/library && ! -f $state/library ) ]]; then
 elif [[ -f $state/library ]] && ! cmp -s "$stage/library" "$state/library"; then
   echo 'existing entry point uses different installation settings; use its original checkout and profile' >&2; exit 2
 fi
-docker build --quiet --tag "$image" "$repo"
+
+begin image "Building the library image"
+quiet docker build --quiet --tag "$image" "$repo"
+
+begin check "Checking the wiki and memory"
+pages=0 memory=${given_memory:-512m} memory_note=default fits=true
+docker_memory=$(docker info --format '{{.MemTotal}}' 2>>"$log" || echo 0)
+if [[ -n $wiki ]]; then
+  pages=$(find "$wiki" -type f -name '*.md' | wc -l | tr -d ' ')
+  bytes=$(( $(du -sk "$wiki" | cut -f1) * 1024 ))
+  # The library runs as UID 10001 and must be able to add pages to the wiki.
+  can_write() {
+    docker run --rm --entrypoint sh -v "$wiki:/w" "$image" \
+      -c 'p=/w/.benedict-write-check; : >"$p" && rm -f "$p"' >>"$log" 2>&1
+  }
+  if ! can_write; then
+    fix="setfacl -R -m u:10001:rwX -m d:u:10001:rwX $(printf %q "$wiki")"
+    other=$(getent passwd 10001 2>/dev/null | cut -d: -f1 || true)
+    if [[ $progress != json && -t 0 ]] && command -v setfacl >/dev/null; then
+      if (( tty )); then printf '\r\033[2K'; fi
+      printf '도서관(UID 10001)이 위키에 쓸 수 없습니다: %s (%s 페이지)\n' "$wiki" "$pages"
+      if [[ -n $other ]]; then printf '이 컴퓨터의 계정 %s도 UID 10001이라, 그 계정도 위키를 고칠 수 있게 됩니다.\n' "$other"; fi
+      printf '이 폴더에만 읽기·쓰기 권한을 줄까요? [Y/n] '
+      IFS= read -r yes || yes=n
+      if [[ ${yes:-y} =~ ^[Yy]?$ ]] && setfacl -R -m u:10001:rwX -m d:u:10001:rwX "$wiki" >>"$log" 2>&1 && can_write; then
+        printf '  granted UID 10001 access; undo: setfacl -R -x u:10001 -x d:u:10001 %q\n' "$wiki" >>"$log"
+      else
+        trap - ERR; stop 2 "The library (UID 10001) cannot write $wiki. To allow it: $fix"
+      fi
+    else
+      trap - ERR; stop 2 "The library (UID 10001) cannot write $wiki. Ask the user, then run: $fix"
+    fi
+  fi
+  if [[ -z $given_memory ]]; then
+    recommendation=$(docker run --rm "$image" setup --recommend-memory --pages "$pages" --bytes "$bytes" --docker-memory "$docker_memory")
+    memory=$(jq -r .memory <<<"$recommendation")
+    fits=$(jq -r .fits <<<"$recommendation")
+    memory_note="recommended for $pages pages"
+  else
+    memory_note=chosen
+  fi
+fi
+if [[ $fits != true ]]; then
+  say "  Docker can give this library at most $memory; a wiki of $pages pages may need more. Raise Docker's memory to be safe."
+fi
+
+begin profile "Writing the installation profile"
 if (( $# == 1 )) && [[ ! -e $profile ]]; then
-  docker run --rm --user "$(id -u):$(id -g)" -v "$stage:/settings" "$image" setup --project "$project" "${source_args[@]}" "${answer_args[@]}" --output /settings/profile.json
+  if [[ ${source_args[1]:-} != example ]]; then
+    answer_args+=(--database "${given_database:-sqlite}" --memory "$memory" --shelf "${given_shelf:-none}")
+  elif [[ -n $given_memory ]]; then
+    answer_args+=(--memory "$memory")
+  fi
+  answer_args+=(--autostart "${given_autostart:-on}")
+  quiet docker run --rm --user "$(id -u):$(id -g)" -v "$stage:/settings" "$image" setup --project "$project" "${source_args[@]}" "${answer_args[@]}" --output /settings/profile.json
   mv -- "$stage/profile.json" "$profile"
 fi
 export LIBRARY_IMAGE="$image"
 compose=(docker compose -p "$project" -f "$base" -f "$profile")
-"${compose[@]}" up -d --no-build --wait room
-"${compose[@]}" run --rm -T library setup --activate
+
+begin room "Starting the room service"
+quiet "${compose[@]}" up -d --no-build --wait room
+
+begin index "Indexing the wiki"
+# If initial indexing runs out of memory with a limit the installer chose, double it and try again.
+cap_mib=$(( docker_memory / 1048576 / 3 * 2 ))
+while ! quiet "${compose[@]}" run --rm -T library setup --activate; do
+  limit_mib=$(( $(jq -r '.services.library.mem_limit // 0' "$profile") / 1048576 ))
+  next_mib=$(( limit_mib * 2 ))
+  if (( cap_mib > 0 && next_mib > cap_mib )); then next_mib=$cap_mib; fi
+  if [[ -n $given_memory || $profile != "$state/profile.json" ]] \
+    || ! tail -n 20 "$log" | grep -q -e 'initial wiki indexing failed' -e 'exit code 137' \
+    || (( next_mib <= limit_mib )); then
+    trap - ERR; stop 1 "$(reason)"
+  fi
+  jq --argjson m "$(( next_mib * 1048576 ))" '(.services[] | select(has("mem_limit")) | .mem_limit) = $m' \
+    "$profile" >"$profile.next" && mv -- "$profile.next" "$profile"
+  memory_note="raised from ${limit_mib}m after initial indexing ran out of memory"
+  printf '  initial indexing ran out of memory at %sm; retrying with %sm\n' "$limit_mib" "$next_mib" >>"$log"
+  quiet "${compose[@]}" up -d --no-build --wait room
+done
+documents=$(grep -o '"documents":[0-9]*' "$log" | tail -n 1 | cut -d: -f2 || true)
+
+begin finish "Starting the librarian and adding project instructions"
+if [[ $librarian == on ]]; then
+  quiet "${compose[@]}" --profile rooms up -d --no-build librarian
+fi
 mv -- "$stage/library" "$state/library"
 for name in AGENTS.md CLAUDE.md GEMINI.md; do
   if [[ ! -f $workspace/$name ]] || ! cmp -s "$stage/$name" "$workspace/$name"; then
     mv -- "$stage/$name" "$workspace/$name"
   fi
 done
+ended
+trap - ERR
+
+limit=$(jq -r '.services.library.mem_limit // 0' "$profile")
+database=SQLite
+if jq -e '.services.library.environment.LIBRARY_DB_URL_FILE' "$profile" >/dev/null; then database=PostgreSQL; fi
+restart=$(jq -r '.services.room.restart // "no"' "$profile")
+emit "$(jq -cn --argjson steps "$steps" --argjson elapsed "$(( $(date +%s) - started ))" \
+  --arg workspace "$workspace" --arg project "$project" --argjson documents "${documents:-null}" \
+  --argjson memory "$limit" --arg database "$database" --arg restart "$restart" --arg librarian "$librarian" \
+  '{event:"done",steps:$steps,elapsed:$elapsed,workspace:$workspace,project:$project,documents:$documents,memory:$memory,database:$database,restart:$restart,librarian:$librarian}')"
 printf 'Benedict is ready in %s\n' "$workspace"
+if [[ $progress != json ]]; then
+  if [[ -n $wiki ]]; then from="your wiki $wiki ($pages pages)"; else from=${source_args[1]:-the existing profile}; fi
+  if [[ $librarian == on ]]; then keeper='running: rebuilds the index once a day'; else keeper=off; fi
+  if [[ $restart == no ]]; then reboot='start it yourself'; else reboot='starts again by itself'; fi
+  cat <<SUMMARY
+  Started from      $from
+  Indexed           ${documents:-?} documents in $(( $(date +%s) - started ))s
+  Memory limit      $(( limit / 1048576 ))m per container ($memory_note)
+  Database          $database
+  Librarian         $keeper
+  After a reboot    $reboot
+  Log               $log
+To change a choice, install into a new project folder with --memory SIZE, --database postgres
+--database-secret-file FILE, --shelf DIR, --autostart off or --librarian off.
+SUMMARY
+fi
