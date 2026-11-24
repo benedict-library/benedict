@@ -250,6 +250,13 @@ if (( $# == 1 )) && [[ ! -e $profile ]]; then
   quiet docker run --rm --user "$(id -u):$(id -g)" -v "$stage:/settings" "$image" setup --project "$project" "${source_args[@]}" "${answer_args[@]}" --output /settings/profile.json
   mv -- "$stage/profile.json" "$profile"
 fi
+# Profiles from earlier installers left the librarian on the bundled golden questions, which fit only
+# the example library. Clear them as a new profile does unless the library started from the example.
+if [[ $profile == "$state/profile.json" ]] \
+  && ! jq -e '.services.library.environment.LIBRARY_START == "example"
+    or (.services.librarian.environment // {} | has("LIBRARY_GOLDEN"))' "$profile" >/dev/null; then
+  jq '.services.librarian.environment.LIBRARY_GOLDEN = ""' "$profile" >"$profile.next" && mv -- "$profile.next" "$profile"
+fi
 export LIBRARY_IMAGE="$image"
 compose=(docker compose -p "$project" -f "$base" -f "$profile")
 

@@ -98,6 +98,11 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Upgrading a library installed from your own wiki by an earlier installer no longer points its librarian at the
+  bundled example golden questions. `install-project` clears `LIBRARY_GOLDEN` in such a profile, as new profiles
+  already do, so the librarian reads `golden/LIBRARY.jsonl` and reports `not_configured` without one.
+- The image makes everything under `/app` readable. A checkout with private file modes (for example cloned with
+  umask 007) produced an image whose bundled files the library account could not read.
 - `bin/gate.py` creates each socket with mode 0660 instead of narrowing it after it is created, so a
   client can no longer connect while the socket is still open to everyone.
 - `read shelf:<path>` no longer refuses an original that is not plain text. A PDF, office document
