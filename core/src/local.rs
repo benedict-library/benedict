@@ -549,8 +549,15 @@ fn read(reg: &Registry, key: &str, path: &str) -> Result<Value> {
         let shelf = reg
             .shelf_root(key)?
             .ok_or("no shelf configured for the selected library")?;
-        let (text, sha256) = crate::shelf::read(&shelf, name)?;
-        return Ok(json!({"library":key, "path":path, "text":text, "sha256":sha256}));
+        return Ok(match crate::shelf::open_original(&shelf, name)? {
+            crate::shelf::Original::Text(text, sha256) => {
+                json!({"library":key, "path":path, "text":text, "sha256":sha256})
+            }
+            crate::shelf::Original::Binary(bytes, sha256) => json!({
+                "library":key, "path":path, "binary":true, "bytes":bytes, "sha256":sha256,
+                "note":"Not a text original. Open this file from the shelf directly."
+            }),
+        });
     }
     let path = Path::new(path);
     if !relative(path) {

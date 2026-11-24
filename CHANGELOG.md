@@ -36,6 +36,9 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `read shelf:<path>` no longer refuses an original that is not plain text. A PDF, office document
+  or image on the shelf is now described by its size and SHA-256 with `"binary": true`, so an agent
+  can open the file itself instead of being told the original is unreadable.
 - A Docker library bound to your own wiki now gives you read and write access to every page it
   files there. Answers saved through the room and the originals kept by `web-source` were written
   for the container's account only, so the wiki's owner could not open, back up or commit them.
