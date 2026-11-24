@@ -35,7 +35,8 @@ Run each check yourself before proposing anything. A check can fail because of p
 | Memory Docker can use | `docker info --format '{{.MemTotal}}'` (bytes) | On Docker Desktop this is the VM size, not the machine's RAM. The library limit must fit inside it. |
 | Free disk for Docker | `df -h "$(docker info --format '{{.DockerRootDir}}')"` | The image, the index and the database live there. |
 | Wiki size (own wiki only) | `find "$WIKI" -type f -name '*.md' \| wc -l` and `du -sh "$WIKI"` | Initial indexing reads the whole wiki inside one container under the memory limit. |
-| Wiki access (own wiki only) | `test -r "$WIKI" && test -w "$WIKI" && echo ok` | The library writes new pages into the wiki. When the wiki belongs to another account, read the access rules in [docs/docker-setup.md](docs/docker-setup.md#installation-interview) before going on. |
+| Wiki access for you (own wiki only) | `test -r "$WIKI" && test -w "$WIKI" && echo ok` | You open and edit the wiki as this account. |
+| Wiki access for the container (own wiki only) | `stat -c '%u %a' "$WIKI"` and `getfacl -p "$WIKI"` | The library runs as UID 10001 and writes new pages into the wiki. It can write only if UID 10001 owns the folder or an ACL entry `user:10001:rwx` exists. Otherwise the installer stops with `wiki is not writable`. A passing check for you does not mean the container can write. |
 | Shelf access (if any) | `test -r "$SHELF" && echo ok` | The shelf is mounted read-only. |
 
 If `docker info` itself is refused, stop here: the remaining checks and the installation all need Docker.
@@ -54,6 +55,17 @@ Propose a limit from the wiki size you measured, with margin, and keep it at or 
 
 The installer starts only the room service. The librarian service rebuilds the index and runs the golden measurement once a day; without it the index is refreshed only when someone runs a librarian cycle ([issue #3](https://github.com/benedict-library/benedict/issues/3)). Ask whether to start it: **“도서관을 매일 사서가 정리하게 할까요?”**
 
+### Wiki access for the container
+
+If UID 10001 cannot write the wiki, propose this change and run it only after the user agrees. It gives UID 10001 read and write access to the existing pages and to pages created later, and nobody else:
+
+```bash
+setfacl -R -m u:10001:rwX -m d:u:10001:rwX "$WIKI"
+# to undo: setfacl -R -x u:10001 -x d:u:10001 "$WIKI"
+```
+
+The filesystem must support ACLs and the account running the command must own the files. If either is missing, tell the user which one; do not open the folder to all users with `chmod o+w`. More on mixed accounts: [Record each answer as it happens](docs/docker-setup.md#record-each-answer-as-it-happens).
+
 ### Anything that failed
 
 For each failed check, say which command failed, the message, and the change you would make. Make a change only after the user agrees to that specific change.
@@ -69,7 +81,22 @@ bin/install-project --start example PROJECT
 bin/install-project --wiki WIKI --database sqlite --memory LIMIT --shelf SHELF_OR_none PROJECT
 ```
 
-`PROJECT` must already exist. The full interview with PostgreSQL and shelf options is in [docs/docker-setup.md](docs/docker-setup.md). If installation stops with `initial wiki indexing failed`, check for an out-of-memory kill (`dmesg | grep -i -E 'oom|killed process'` on Linux) and tell the user the limit was too small, with the value you would try next.
+`PROJECT` must already exist. Write `LIMIT` as a number with `m` or `g`, for example `512m` or `3g`. The full interview with PostgreSQL and shelf options is in [docs/docker-setup.md](docs/docker-setup.md).
+
+If installation stops:
+
+- `wiki is not writable` — the container check in step 2 was missed; go back to step 3.
+- `initial wiki indexing failed` — check for an out-of-memory kill (`dmesg | grep -i -E 'oom|killed process'` on Linux) and tell the user the limit was too small, with the value you would try next.
+
+A stopped installation keeps `PROJECT/.benedict/profile.json`, a running room container and a Docker network. To retry with the same choices, run `bin/install-project PROJECT` with no options; the installer refuses options when a profile exists. To change a choice such as the memory limit, ask the user, then stop the old project and keep its profile as a backup before installing again:
+
+```bash
+name=$(jq -r .name PROJECT/.benedict/profile.json)
+docker compose -p "$name" -f compose.yaml -f PROJECT/.benedict/profile.json down
+mv PROJECT/.benedict/profile.json PROJECT/.benedict/profile.json.bak
+```
+
+`down` without `-v` keeps the data volume.
 
 ## 5. Start the librarian service (if chosen)
 
