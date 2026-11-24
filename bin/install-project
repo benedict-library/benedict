@@ -3,6 +3,7 @@
 set -euo pipefail
 source_args=()
 answer_args=()
+progress=
 # Each answer to a setup question travels to setup unchanged; setup asks the next missing question.
 while [[ ${1:-} == --* ]]; do
   [[ -n ${2:-} ]] || { echo "$1 needs a value" >&2; exit 2; }
@@ -21,6 +22,9 @@ while [[ ${1:-} == --* ]]; do
       answer_args+=(--database-secret-file "$(cd -- "$(dirname -- "$2")" && pwd -P)/$(basename -- "$2")") ;;
     --memory)
       answer_args+=(--memory "$2") ;;
+    --progress)
+      [[ $2 == json ]] || { echo 'expected --progress json' >&2; exit 2; }
+      progress=json ;;
     --shelf)
       if [[ $2 == none ]]; then
         answer_args+=(--shelf none)
@@ -33,10 +37,25 @@ while [[ ${1:-} == --* ]]; do
   shift 2
 done
 if (( $# < 1 || $# > 2 )); then
-  echo 'usage: bin/install-project [--start example|empty | --wiki DIR] [--database sqlite|postgres] [--database-secret-file FILE] [--memory SIZE] [--shelf DIR|none] EXISTING_WORKSPACE [CONFIRMED_COMPOSE_PROFILE.json]' >&2
+  echo 'usage: bin/install-project [--start example|empty | --wiki DIR] [--database sqlite|postgres] [--database-secret-file FILE] [--memory SIZE] [--shelf DIR|none] [--progress json] EXISTING_WORKSPACE [CONFIRMED_COMPOSE_PROFILE.json]' >&2
   exit 2
 fi
 repo=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
+# With --progress json, standard output carries one JSON event per line; everything else goes to standard error.
+steps=5 step=0 step_id= started=$(date +%s)
+if [[ $progress == json ]]; then exec 3>&1 1>&2; fi
+emit() { if [[ $progress == json ]]; then printf '%s\n' "$1" >&3; fi; }
+begin() {
+  step=$((step + 1)) step_id=$1
+  emit "$(jq -cn --argjson step "$step" --argjson steps "$steps" --arg id "$1" --arg label "$2" \
+    --argjson elapsed "$(( $(date +%s) - started ))" \
+    '{event:"step",step:$step,steps:$steps,id:$id,label:$label,elapsed:$elapsed}')"
+}
+failed() {
+  emit "$(jq -cn --argjson step "$step" --arg id "$step_id" --argjson exit "$1" \
+    '{event:"error",step:$step,id:$id,exit:$exit}')"
+}
+trap 'failed $?' ERR
 workspace=$(cd -- "$1" && pwd -P)
 if [[ $workspace == / || $workspace == "$(cd ~ && pwd -P)" ]]; then
   echo 'select a project directory' >&2; exit 2
@@ -119,15 +138,21 @@ if [[ -L $state/library || ( -e $state/library && ! -f $state/library ) ]]; then
 elif [[ -f $state/library ]] && ! cmp -s "$stage/library" "$state/library"; then
   echo 'existing entry point uses different installation settings; use its original checkout and profile' >&2; exit 2
 fi
+begin image "Building the library image"
 docker build --quiet --tag "$image" "$repo"
+begin profile "Writing the installation profile"
 if (( $# == 1 )) && [[ ! -e $profile ]]; then
   docker run --rm --user "$(id -u):$(id -g)" -v "$stage:/settings" "$image" setup --project "$project" "${source_args[@]}" "${answer_args[@]}" --output /settings/profile.json
   mv -- "$stage/profile.json" "$profile"
 fi
 export LIBRARY_IMAGE="$image"
 compose=(docker compose -p "$project" -f "$base" -f "$profile")
+begin room "Starting the room service"
 "${compose[@]}" up -d --no-build --wait room
-"${compose[@]}" run --rm -T library setup --activate
+begin index "Indexing the wiki"
+activation=$("${compose[@]}" run --rm -T library setup --activate)
+printf '%s\n' "$activation"
+begin finish "Adding project instructions"
 mv -- "$stage/library" "$state/library"
 for name in AGENTS.md CLAUDE.md GEMINI.md; do
   if [[ ! -f $workspace/$name ]] || ! cmp -s "$stage/$name" "$workspace/$name"; then
@@ -135,3 +160,6 @@ for name in AGENTS.md CLAUDE.md GEMINI.md; do
   fi
 done
 printf 'Benedict is ready in %s\n' "$workspace"
+emit "$(jq -cn --argjson steps "$steps" --argjson elapsed "$(( $(date +%s) - started ))" \
+  --arg workspace "$workspace" --arg project "$project" --argjson activation "${activation:-null}" \
+  '{event:"done",steps:$steps,elapsed:$elapsed,workspace:$workspace,project:$project,documents:($activation.index.documents // null)}')"
