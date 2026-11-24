@@ -51,7 +51,7 @@ cd benedict
 bin/install-project --start example ~/projects/notes
 ```
 
-`~/projects/notes`는 내 프로젝트 폴더로 바꿉니다(폴더가 없으면 먼저 만드세요). 예제에는 예제 서가가 딸려 옵니다. 내 위키로 시작하려면 `--start example` 대신 설치 질문에 모두 답합니다: `--wiki 위키_폴더 --database sqlite --memory 512m --shelf 원본_폴더 --autostart on`(빈 서가로 시작하려면 `--shelf none`, 서버를 다시 켠 뒤 직접 올리려면 `--autostart off`). 답이 빠지면 설치가 멈추고 물어야 할 질문을 보여 줍니다.
+`~/projects/notes`는 내 프로젝트 폴더로 바꿉니다(폴더가 없으면 먼저 만드세요). 예제에는 예제 서가가 딸려 옵니다. 내 위키로 시작하려면 `--start example` 대신 `--wiki 위키_폴더`를 씁니다. 설치기는 위키 크기로 메모리 상한을 정하고, 서가 없이 SQLite로 설치하고, 사서를 켜고, 서버를 다시 켜면 도서관도 다시 올립니다. 마지막 요약에 고른 값과 바꾸는 옵션(`--memory`, `--database`, `--shelf`, `--autostart`, `--librarian`)을 보여 줍니다. 도서관이 위키에 쓸 수 없을 때만 한 번 묻습니다.
 
 **3. 연결을 확인합니다.**
 
@@ -67,6 +67,6 @@ bin/install-project --start example ~/projects/notes
 
 에이전트는 설치가 넣어 둔 프로젝트 지침(AGENTS.md, CLAUDE.md, GEMINI.md)을 읽고 도서관을 씁니다.
 
-에이전트에게 “이 프로젝트에 베네딕트를 설치해 줘”라고 맡기면 에이전트는 [install.md](install.md)를 따라 먼저 환경을 확인하고, 메모리 상한과 사서 서비스를 물은 뒤 설치합니다. 새 버전으로 올릴 때는 이 폴더에서 `git pull`로 새 버전을 받고 `bin/install-project ~/projects/notes`를 다시 실행합니다(`--start`는 처음 설치에만 씁니다). 버전마다 바뀐 점은 [변경 기록](CHANGELOG.md)에, 무인 설치와 서가·PostgreSQL 연결은 [설치 안내](docs/docker-setup.md)에, 도커 없이 파이썬으로 해 보는 방법은 [파이썬 호환 명령](docs/python-compat.md)에 있습니다.
+에이전트에게 “이 프로젝트에 베네딕트를 설치해 줘”라고 맡기면 에이전트는 [install.md](install.md)를 따라 어떤 자료로 시작할지만 묻고, 설치기가 고른 값을 알려 드립니다. 새 버전으로 올릴 때는 이 폴더에서 `git pull`로 새 버전을 받고 `bin/install-project ~/projects/notes`를 다시 실행합니다(`--start`는 처음 설치에만 씁니다). 버전마다 바뀐 점은 [변경 기록](CHANGELOG.md)에, 무인 설치와 서가·PostgreSQL 연결은 [설치 안내](docs/docker-setup.md)에, 도커 없이 파이썬으로 해 보는 방법은 [파이썬 호환 명령](docs/python-compat.md)에 있습니다.
 
 [설치 환경과 저장소](docs/portability.md) · [실별 명령과 예제](docs/agent-usage.md) · [전령 안내(영문)](docs/courier.md) · [광장 안내(영문)](docs/plaza.md) · [검증 방법](docs/verification.md) · [보안](SECURITY.md) · [기여](CONTRIBUTING.md) · [MIT 라이선스](LICENSE)

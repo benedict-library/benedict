@@ -16,6 +16,17 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `install-project` asks only where the library starts. For your own wiki it uses SQLite without a
+  shelf, starts the librarian, turns autostart on and sets the memory limit from the wiki size with
+  `setup --recommend-memory` (measured: about 20,000 pages fit in 2 GiB, about 40,000 in 3 GiB; at most
+  two thirds of Docker's memory). If initial indexing still runs out of memory, the installer doubles the
+  limit and tries again. A summary shows every choice and the option that changes it.
+- `install-project` checks that the library (UID 10001) can write the wiki. In a terminal it asks once
+  before granting that UID access with `setfacl`; otherwise it stops with the exact command.
+- `install-project` prints one line per step with a running clock and keeps Docker's output in
+  `.benedict/install.log`; a failure shows its reason and the log path. `--progress json` prints one JSON
+  event per step instead. `install.md` is the guide for installing agents.
+
 - The project entry point (`.benedict/library`) sends each command into the running room container with
   `docker exec` instead of starting a new container for every command. A search no longer waits for a
   container to start. To upgrade an installed project, delete its `.benedict/library` and run
