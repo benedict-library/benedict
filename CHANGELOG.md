@@ -48,7 +48,9 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   answered in about 0.1 second, where reading the JSON index took 8 to 9 seconds.
 - The default memory limit is 1 GiB per container (was 512 MiB); `--memory` changes it.
 - The first librarian run after an upgrade compares five questions on the earlier JSON index file and the
-  database. It removes the file when they agree; otherwise the file stays and `index_mismatch` lists the questions.
+  database, over the pages both hold the same: pages added, removed or changed since the file was written (such
+  as the bundled skill page an upgrade replaces) are left out of both and counted in `changed_since_json`. It
+  removes the file when they agree; otherwise the file stays and `index_mismatch` lists the questions.
 
 - Setup asks whether the library starts again when the host restarts (`--autostart on|off`). `on`, the
   recommended answer and the example start's default, gives the room and librarian containers
