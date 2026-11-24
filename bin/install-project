@@ -238,6 +238,8 @@ if [[ $fits != true ]]; then
 fi
 
 begin profile "Writing the installation profile"
+# An upgrade or a retry keeps the memory limit the profile already holds.
+if [[ -e $profile && -z $given_memory ]]; then memory_note="kept from the installation"; fi
 if (( $# == 1 )) && [[ ! -e $profile ]]; then
   if [[ ${source_args[1]:-} != example ]]; then
     answer_args+=(--database "${given_database:-sqlite}" --memory "$memory" --shelf "${given_shelf:-none}")

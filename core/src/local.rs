@@ -699,12 +699,7 @@ pub fn run(cmd: &str, args: &[String]) -> Result<Option<i32>> {
             for other in reads.iter().filter_map(Value::as_str) {
                 let mut row = json!({"library":other,"name":reg.rows[other].get("name").unwrap_or(&json!(other))});
                 match search_one(&reg, other, pos[0], 3) {
-                    Ok(h) => {
-                        row["hits"] = h["hits"].clone();
-                        if let Some(why) = h.get("fallback") {
-                            row["fallback"] = why.clone();
-                        }
-                    }
+                    Ok(h) => row["hits"] = h["hits"].clone(),
                     Err(e) => row["error"] = json!(e),
                 }
                 near.push(row);
