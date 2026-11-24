@@ -64,8 +64,8 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `save` keeps one database record (`kind: record`) and no longer writes a wiki page. `file --id` writes the filing,
   adds one golden line per question with wiki sources (another wiki source for the same question extends that line)
   and sets `filed_at`. Running it again fills only what is missing.
-- The compose librarian no longer passes the example golden file; only the example start points
-  `LIBRARY_GOLDEN` at it.
+- The compose librarian no longer uses the example golden file. The example start copies it to
+  `golden/main.jsonl` when that file does not exist yet; other libraries grow their own from filed answers.
 - Search goes through the search room. Without the room service it fails with `search room not running`, and a
   library without an index fails with `run index or librarian`; search no longer reads a JSON index file or the
   wiki files. Without `LIBRARY_DB` the SQLite database sits beside `library.json`. The Python compatibility
@@ -106,9 +106,9 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (up to 2,000; a larger change is written while it is read, as on a first index). Before, the transaction
   stayed open for the whole read, so with SQLite a search recorded during the librarian's cycle waited
   ten seconds and failed with `database is locked` (measured on 31,164 pages: a 13-second read).
-- Upgrading a library installed from your own wiki by an earlier installer no longer points its librarian at the
-  bundled example golden questions. `install-project` clears `LIBRARY_GOLDEN` in such a profile, as new profiles
-  already do, so the librarian reads `golden/LIBRARY.jsonl` and reports `not_configured` without one.
+- Upgrading a library installed from your own wiki no longer points its librarian at the bundled example golden
+  questions: `compose.yaml` no longer sets `LIBRARY_GOLDEN`, so the librarian reads `golden/LIBRARY.jsonl` and
+  reports `not_configured` without one.
 - The image makes everything under `/app` readable. A checkout with private file modes (for example cloned with
   umask 007) produced an image whose bundled files the library account could not read.
 - `bin/gate.py` creates each socket with mode 0660 instead of narrowing it after it is created, so a
