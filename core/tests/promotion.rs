@@ -131,14 +131,11 @@ fn file_preserves_original_and_rejects_unanswered_or_unrelated_rows() {
     ] {
         assert!(page.contains(text));
     }
-    let saved = success(&[
-        "recall",
-        "--library",
-        "research",
-        "--id",
-        &receipt["record_id"].to_string(),
-    ]);
-    assert_eq!(saved["query"], "batch A7");
-    let original = success(&["recall", "--library", "research", "--id", &id]);
+    // Filing adds no record; it marks the original as filed and keeps the rest.
+    assert!(receipt.get("record_id").is_none());
+    let mut original = success(&["recall", "--library", "research", "--id", &id]);
+    assert_ne!(original["filed_at"], "");
+    assert_eq!(receipt["filed_at"], original["filed_at"]);
+    original["filed_at"] = "".into();
     assert_eq!(original, completed);
 }

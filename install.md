@@ -54,6 +54,7 @@ It prints the step, the reason and the log path (`PROJECT/.benedict/install.log`
 
 - **The library cannot write the wiki.** The installer prints the exact `setfacl` command. It gives UID 10001 read and write access to that folder only. Before proposing it, run `getent passwd 10001`: if an account is printed, that person could also edit the wiki, so say so. No output (exit status 2) means no account uses that UID. Run the command only after the user agrees, then run the installer again with the same options. Run in a terminal, the installer asks this itself.
 - **Docker cannot give enough memory.** The installer warns when the recommended limit is larger than two thirds of Docker's memory. Tell the user they can raise Docker Desktop's memory or use a machine with more memory.
+- **The bundled skill page was edited.** An upgrade replaces `entities/skill_benedict-library.md` when it is the page an earlier version wrote. If someone changed it, the installer stops. Ask the user before moving their version to another name (for example `entities/skill_benedict-library.local.md`), then run the installer again.
 - **Anything else.** Show the reason line and the last lines of the log. Do not change files or permissions without the user's agreement.
 
 To retry, run the installer again with the same options. Once step 3 has written `PROJECT/.benedict/profile.json`, `bin/install-project PROJECT` with no options also retries with the same choices. To change a choice after that, choose a new project folder.

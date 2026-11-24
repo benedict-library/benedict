@@ -20,6 +20,21 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   are read with kordoc's built-in OCR. Without `--pages` the result describes the original and says how to
   read part of it. The image pins kordoc and its parts in `readers/package-lock.json` and copies the Node
   24 LTS binary from the pinned `node` image.
+- `benedict room append` keeps room conversation as it happens. The room service writes each event to
+  `/data/shelf/transcripts/YYMMDD/LIBRARY-ROOM.jsonl` first, then to that room's memory, and returns its file and
+  line. A repeated request ID from today or yesterday returns the earlier line. Without the room service the event
+  is refused (`room service not running`); a transcript write failure refuses the event.
+- Each room has its own memory window. Together they use half of the container's memory limit (half of 512 MiB
+  when the limit cannot be read), and a full room drops its oldest events first. An event larger than its share
+  keeps an excerpt and its transcript line. `room ping` reports each room's use and dropped count.
+- Meeting tasks, replies, dispatches, `room open` and `room responses` also leave their originals in the transcript
+  and need the room service.
+- `save --session ID --turns DAY/FILE:A-B` (or `DAY/FILE:A..DAY/FILE:B` across midnight) links a record to its
+  transcript lines. Records gain `session`, `turns`, `at`, `kind` and `filed_at`; older rows keep empty values.
+- `install-project --transcript-days N|keep` (default keep) sets how long transcripts stay; the summary shows it.
+- The librarian removes transcript days past `LIBRARY_TRANSCRIPT_DAYS`, counts saved records not yet filed and
+  reads `golden/LIBRARY.jsonl` by default. A missing golden file is `not_configured`; a bad line is `invalid` with
+  its line number. Neither stops the cycle.
 
 - Setup asks whether the library starts again when the host restarts (`--autostart on|off`). `on`, the
   recommended answer and the example start's default, gives the room and librarian containers
@@ -30,6 +45,13 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `save` keeps one database record (`kind: record`) and no longer writes a wiki page. `file --id` writes the filing,
+  adds one golden line per question with wiki sources (another wiki source for the same question extends that line)
+  and sets `filed_at`. Running it again fills only what is missing.
+- The compose librarian no longer passes the example golden file; only the example start points
+  `LIBRARY_GOLDEN` at it.
+- An upgrade replaces the bundled skill page (`entities/skill_benedict-library.md`) when it is the page an
+  earlier version wrote. An edited page stops the installer with a message that says how to keep it.
 - `install-project` asks only where the library starts. For your own wiki it uses SQLite without a
   shelf, starts the librarian, turns autostart on and sets the memory limit from the wiki size with
   `setup --recommend-memory` (measured: about 20,000 pages fit in 2 GiB, about 40,000 in 3 GiB; at most

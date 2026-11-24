@@ -1,6 +1,15 @@
 # Library method
 
-In a Docker installation, room observations are retained in the project database and in a bounded shared memory window. Pass the user’s exact wording with `--question` and the agent’s search terms separately. The librarian files a reusable answered observation with `benedict file --id RECORD`; the wiki page retains the original question, answer and evidence. Original shelf files stay on the selected storage.
+In a Docker installation, records move through four layers:
+
+| Layer | What it holds | Who writes it |
+| --- | --- | --- |
+| Room memory | Everything said in each room, in order, up to that room's share of half the container's memory limit | The room service, after the transcript line is written |
+| Shelf transcript | Every event as it happened, one file per day and room under `/data/shelf/transcripts/YYMMDD/`, kept until `--transcript-days` removes it (default: keep) | The room service (`benedict room append`, and every stored record) |
+| Database | The summary an agent saves when work is done: question, conclusion, sources and the transcript lines it covers | The agent (`benedict save --session --turns`) |
+| Filing cabinet | Saved records the librarian chose to publish | The librarian (`benedict file --id RECORD`) |
+
+Pass the user’s exact wording with `--question` and the agent’s search terms separately. Filing a record with wiki sources also adds its question to `/data/golden/LIBRARY.jsonl`, so the librarian's retrieval check grows from real questions. Original shelf files stay on the selected storage.
 
 ## How agents work in the library
 
@@ -27,7 +36,8 @@ Suppose the next agent has to order markers for a field survey. The project chos
    named reading variable when collaborating. Search snippets point to evidence; they are not evidence substitutes.
 4. **Share bounded work through a meeting room.** Use named tasks and mailboxes. Store the question, inputs,
    completion state and reply; another worker can continue without an undocumented private conversation.
-5. **File the answered question.** Save question, answer and sources in Markdown. Keep quality/rule refusals visible.
+5. **Save the answered question, then let the librarian file it.** Save question, answer, sources and the transcript
+   lines in the database. The librarian files the ones worth keeping. Keep quality/rule refusals visible.
    The filing cabinet grows from answers actually grounded in originals, not self-referential summaries.
 6. **Let the librarian keep layers in step.** After external edits, refresh lexical indexes and room documents.
    Record actual start/end/outcome in the journal. Failed sync or evaluation must remain failure, not a fresh mtime.
