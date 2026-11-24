@@ -88,19 +88,25 @@ fn run_program(program: &std::path::Path, args: &[String]) -> Value {
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn();
     let Ok(mut child) = child else {
         return json!({"error": "gate cannot start the command"});
     };
     // Read while waiting: a result larger than the pipe buffer would otherwise block the command.
-    let reader = child.stdout.take().map(|mut out| {
-        std::thread::spawn(move || {
-            let mut text = String::new();
-            let _ = out.read_to_string(&mut text);
-            text
+    fn collect(
+        pipe: Option<impl Read + Send + 'static>,
+    ) -> Option<std::thread::JoinHandle<String>> {
+        pipe.map(|mut p| {
+            std::thread::spawn(move || {
+                let mut text = String::new();
+                let _ = p.read_to_string(&mut text);
+                text
+            })
         })
-    });
+    }
+    let reader = collect(child.stdout.take());
+    let errors = collect(child.stderr.take());
     let started = Instant::now();
     loop {
         match child.try_wait() {
@@ -115,8 +121,15 @@ fn run_program(program: &std::path::Path, args: &[String]) -> Value {
         }
     }
     let text = reader.and_then(|r| r.join().ok()).unwrap_or_default();
+    let errors = errors.and_then(|r| r.join().ok()).unwrap_or_default();
+    // Benedict reports a refused command as one JSON object on standard error.
+    let error = serde_json::from_str::<Value>(errors.trim())
+        .ok()
+        .filter(|v| v["error"].is_string());
     serde_json::from_str(text.trim())
-        .unwrap_or_else(|_| json!({"error": "the command gave no result"}))
+        .ok()
+        .or(error)
+        .unwrap_or_else(|| json!({"error": "the command gave no result"}))
 }
 
 fn handle(mut stream: TcpStream) {
@@ -195,6 +208,13 @@ mod tests {
             r#"printf '{"text":"'; head -c 200000 /dev/zero | tr '\0' x; printf '"}'"#.to_owned();
         let reply = run_program(std::path::Path::new("sh"), &["-c".into(), script]);
         assert_eq!(reply["text"].as_str().map(str::len), Some(200_000));
+    }
+
+    #[test]
+    fn a_refused_command_returns_its_own_error() {
+        let script = r#"printf '{"error":"empty shelf path"}' >&2; exit 2"#.to_owned();
+        let reply = run_program(std::path::Path::new("sh"), &["-c".into(), script]);
+        assert_eq!(reply["error"], "empty shelf path");
     }
 
     #[test]
