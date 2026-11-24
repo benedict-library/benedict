@@ -247,6 +247,34 @@ fn a_long_read_does_not_block_a_write() {
 }
 
 #[test]
+fn a_database_from_an_earlier_release_switches_to_wal_when_no_one_is_reading() {
+    // An upgrade starts the room first, and it loads the index in a long read. Switching an earlier
+    // database to WAL needs a moment without readers; until then writes work in the earlier mode.
+    let library = Library::fixture();
+    library.ok(&["index"]);
+    let mode = |db: &rusqlite::Connection| -> String {
+        db.query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap()
+    };
+    let reader = library.database();
+    let _: String = reader.query_row("PRAGMA journal_mode=DELETE", [], |r| r.get(0)).unwrap();
+    assert_eq!(mode(&reader), "delete");
+    reader.execute_batch("BEGIN").unwrap();
+    let _: i64 = reader.query_row("SELECT count(*) FROM benedict_terms", [], |r| r.get(0)).unwrap();
+    fs::write(library.path().join("wiki/entities/policy-00.md"), "# Zebra\n\nzebra\n").unwrap();
+    let mut child = library.cmd().arg("index").stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    // Hold the read longer than the ten-second busy timeout, as a large index load does.
+    std::thread::sleep(Duration::from_secs(11));
+    reader.execute_batch("COMMIT").unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let indexed: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(indexed["changed"], 1);
+    fs::write(library.path().join("wiki/entities/policy-00.md"), "# Zebra\n\nzebra two\n").unwrap();
+    library.ok(&["index"]);
+    assert_eq!(mode(&library.database()), "wal");
+}
+
+#[test]
 fn many_changed_pages_are_written_while_they_are_read() {
     // Past the number of changed pages kept in memory, the index writes pages as it reads them.
     let library = Library::new();
