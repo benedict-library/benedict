@@ -29,5 +29,8 @@
 !core/Cargo.lock
 !core/src/
 !core/src/**
+!readers/
+!readers/package.json
+!readers/package-lock.json
 core/target/
 native/target/
