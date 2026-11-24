@@ -408,8 +408,14 @@ fn summary(text: &str) -> String {
     summary.chars().take(300).collect()
 }
 
+/// Changed documents kept in memory while the library is read. Beyond this many (a large change),
+/// documents are written while they are read, as on a first index.
+const HELD: usize = 2_000;
+const MANY: &str = "more changed documents than are held";
+
 /// Index the library into the database. Only documents whose text changed are written again,
 /// documents that are gone are removed, and the new version is set in the same transaction.
+/// The documents are read before the transaction starts, so the room can record searches meanwhile.
 fn build_index(reg: &Registry, key: &str) -> Result<Value> {
     let started = Instant::now();
     let lock_path = reg.index_path(key).with_extension("lock");
@@ -430,27 +436,67 @@ fn build_index(reg: &Registry, key: &str) -> Result<Value> {
         index_store::hashes(key)?
     };
     let (mut documents, mut changed, mut removed) = (0u64, 0u64, 0u64);
-    let written = index_store::write(key, reset, &mut |sink| {
-        each_document(reg, key, &root, &mut |path, text| {
+    let new_state = |documents| IndexState {
+        root: root_text.clone(),
+        shelf_root: shelf_text.clone(),
+        indexed_at: Utc::now().to_rfc3339_opts(SecondsFormat::Micros, false),
+        documents,
+    };
+    // Read every document first and keep only the changed ones.
+    let mut held = Vec::new();
+    let mut left = known.clone();
+    let read_first = !reset
+        && match each_document(reg, key, &root, &mut |path, text| {
             documents += 1;
             let hash = format!("{:x}", Sha256::digest(text.as_bytes()));
-            if known.remove(&path).as_deref() != Some(hash.as_str()) {
-                changed += 1;
-                sink(IndexEntry::Document(indexed(path, &text, hash)))?;
+            if left.remove(&path).as_deref() != Some(hash.as_str()) {
+                if held.len() == HELD {
+                    return Err(MANY.into());
+                }
+                held.push(indexed(path, &text, hash));
             }
             Ok(())
-        })?;
-        for (path, _) in known.drain() {
-            removed += 1;
-            sink(IndexEntry::Removed(path))?;
+        }) {
+            Ok(()) => true,
+            Err(e) if e == MANY => false,
+            Err(e) => return Err(e),
+        };
+    let written = if read_first {
+        changed = held.len() as u64;
+        removed = left.len() as u64;
+        if changed + removed == 0 {
+            None
+        } else {
+            index_store::write(key, false, &mut |sink| {
+                for doc in held.drain(..) {
+                    sink(IndexEntry::Document(doc))?;
+                }
+                for (path, _) in left.drain() {
+                    sink(IndexEntry::Removed(path))?;
+                }
+                Ok(Some(new_state(documents)))
+            })?
         }
-        Ok((reset || changed > 0 || removed > 0).then(|| IndexState {
-            root: root_text.clone(),
-            shelf_root: shelf_text.clone(),
-            indexed_at: Utc::now().to_rfc3339_opts(SecondsFormat::Micros, false),
-            documents,
-        }))
-    })?;
+    } else {
+        drop((held, left));
+        documents = 0;
+        index_store::write(key, reset, &mut |sink| {
+            each_document(reg, key, &root, &mut |path, text| {
+                documents += 1;
+                let hash = format!("{:x}", Sha256::digest(text.as_bytes()));
+                if known.remove(&path).as_deref() != Some(hash.as_str()) {
+                    changed += 1;
+                    sink(IndexEntry::Document(indexed(path, &text, hash)))?;
+                }
+                Ok(())
+            })?;
+            for (path, _) in known.drain() {
+                removed += 1;
+                sink(IndexEntry::Removed(path))?;
+            }
+            Ok((reset || changed > 0 || removed > 0).then(|| new_state(documents)))
+        })?
+    };
     let state = match written {
         Some(state) => state,
         None => previous.ok_or("index state missing; rebuild index")?,
