@@ -62,6 +62,21 @@ To retry, run the installer again with the same options. Once step 3 has written
 
 The summary lists where the library started from, the number of indexed documents, the memory limit and why, the database, the librarian and what happens after a reboot, with the options that change each of them. Show it to the user as it is. Then run `PROJECT/.benedict/library room ping` and report the result.
 
+## Upgrading an installed library
+
+Use this section instead of steps 1 to 3 when the user asks to update or upgrade Benedict and `PROJECT/.benedict/profile.json` already exists. Ask nothing.
+
+From the Benedict checkout:
+
+```bash
+git pull
+bin/install-project PROJECT
+```
+
+The installer builds the new image, starts the room and the librarian again from it and indexes the wiki again. The profile, the wiki, the shelf and the data volume stay as they are, so the choices made at installation are kept. Do not pass `--start` or `--wiki`. If the librarian was turned off at installation, pass `--librarian off` again; without it the installer starts the librarian.
+
+Do not rebuild or restart the containers with `docker compose` yourself: that can leave the librarian on the old version. If the installer stops, follow step 4. Afterwards do step 5, and read the [changelog](CHANGELOG.md) for anything a version asks you to do by hand.
+
 ## EXECUTE NOW
 
-Start with step 1.
+Start with step 1. For an installed library that the user wants updated, go to “Upgrading an installed library” instead.
