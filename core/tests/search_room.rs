@@ -5,7 +5,8 @@ use serde_json::{Value, json};
 use std::{
     fs,
     path::{Path, PathBuf},
-    process::{Command, Output},
+    process::{Command, Output, Stdio},
+    time::{Duration, Instant},
 };
 
 struct Library {
@@ -187,6 +188,61 @@ fn a_changed_or_removed_document_shows_in_the_next_search() {
     assert_eq!(removed["removed"], 1);
     assert_eq!(removed["documents"], 42);
     assert!(paths(&library.ok(&["search", "zebra"])).is_empty());
+}
+
+#[test]
+fn an_index_with_nothing_changed_does_not_wait_for_the_database() {
+    // The room records each search in the database. While the librarian reads every page it must
+    // not hold the write lock, or those records wait and fail with "database is locked".
+    let library = Library::fixture();
+    library.ok(&["index"]);
+    let db = library.database();
+    db.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let mut child = library.cmd().arg("index").stdout(Stdio::piped()).spawn().unwrap();
+    let until = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break Some(status);
+        }
+        if Instant::now() > until {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    db.execute_batch("ROLLBACK").unwrap();
+    assert!(status.expect("index waited for the write lock").success());
+    let out: Value = serde_json::from_reader(child.stdout.take().unwrap()).unwrap();
+    assert_eq!(out["changed"], 0);
+}
+
+#[test]
+fn many_changed_pages_are_written_while_they_are_read() {
+    // Past the number of changed pages kept in memory, the index writes pages as it reads them.
+    let library = Library::new();
+    let wiki = library.path().join("wiki");
+    fs::create_dir_all(&wiki).unwrap();
+    let pages = 2_100;
+    let write = |word: &str| {
+        for i in 0..pages {
+            fs::write(wiki.join(format!("p{i}.md")), format!("# Page {i}\n\n{word}\n")).unwrap();
+        }
+    };
+    write("first");
+    fs::write(
+        library.path().join("library.json"),
+        json!({"version":1,"libraries":{"main":{"wiki_root":"wiki","central":true}}}).to_string(),
+    )
+    .unwrap();
+    library.ok(&["index"]);
+    write("second");
+    let indexed = library.ok(&["index"]);
+    assert_eq!(indexed["changed"], pages);
+    assert_eq!(indexed["documents"], pages);
+    let _room = library.room();
+    assert!(!paths(&library.ok(&["search", "second"])).is_empty());
+    assert!(paths(&library.ok(&["search", "first"])).is_empty());
 }
 
 #[test]
