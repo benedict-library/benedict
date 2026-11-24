@@ -26,6 +26,8 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `install-project` prints one line per step with a running clock and keeps Docker's output in
   `.benedict/install.log`; a failure shows its reason and the log path. `--progress json` prints one JSON
   event per step instead. `install.md` is the guide for installing agents.
+- `install.md` tells installing agents how to upgrade an installed library: `git pull`, then
+  `bin/install-project PROJECT` again. The upgrade was described only at the end of the README.
 
 - The project entry point (`.benedict/library`) sends each command into the running room container with
   `docker exec` instead of starting a new container for every command. A search no longer waits for a
