@@ -36,7 +36,15 @@ fn original(dir: &File, name: &std::ffi::OsStr) -> Result<File> {
     Ok(file)
 }
 
-pub fn read(root: &Path, name: &str) -> Result<(String, String)> {
+/// A shelf original as read: text with its SHA-256, or a non-text original
+/// (PDF, office document, image) described by its size and SHA-256 so the
+/// agent can open the file itself.
+pub enum Original {
+    Text(String, String),
+    Binary(u64, String),
+}
+
+fn locate(root: &Path, name: &str) -> Result<File> {
     let mut dir = directory(root)?;
     let mut components = Path::new(name).components().peekable();
     while let Some(c) = components.next() {
@@ -52,18 +60,30 @@ pub fn read(root: &Path, name: &str) -> Result<(String, String)> {
                     .map_err(|_| "shelf original unavailable")?,
             );
         } else {
-            let mut text = String::new();
-            original(&dir, part)?
-                .read_to_string(&mut text)
-                .map_err(|_| "read requires a UTF-8 shelf original")?;
-            if text.contains('\0') {
-                return Err("read requires a text shelf original".into());
-            }
-            let hash = format!("{:x}", Sha256::digest(text.as_bytes()));
-            return Ok((text, hash));
+            return original(&dir, part);
         }
     }
     Err("empty shelf path".into())
+}
+
+pub fn read(root: &Path, name: &str) -> Result<(String, String)> {
+    match open_original(root, name)? {
+        Original::Text(text, hash) => Ok((text, hash)),
+        Original::Binary(..) => Err("read requires a text shelf original".into()),
+    }
+}
+
+pub fn open_original(root: &Path, name: &str) -> Result<Original> {
+    let mut bytes = Vec::new();
+    locate(root, name)?
+        .read_to_end(&mut bytes)
+        .map_err(|_| "shelf original unavailable")?;
+    let hash = format!("{:x}", Sha256::digest(&bytes));
+    let size = bytes.len() as u64;
+    match String::from_utf8(bytes) {
+        Ok(text) if !text.contains('\0') => Ok(Original::Text(text, hash)),
+        _ => Ok(Original::Binary(size, hash)),
+    }
 }
 
 pub fn index(root: &Path, docs: &mut BTreeMap<String, String>) -> Result<()> {
@@ -116,4 +136,32 @@ fn walk(dir: &File, prefix: &str, docs: &mut BTreeMap<String, String>) -> Result
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_binary_original_is_described_instead_of_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join("reports")).unwrap();
+        std::fs::write(tmp.path().join("reports/notes.txt"), "plain words").unwrap();
+        let pdf = b"%PDF-1.7\n\xff\xfe\x00binary";
+        std::fs::write(tmp.path().join("reports/scan.pdf"), pdf).unwrap();
+
+        match open_original(tmp.path(), "reports/notes.txt").unwrap() {
+            Original::Text(text, _) => assert_eq!(text, "plain words"),
+            Original::Binary(..) => panic!("text original read as binary"),
+        }
+        match open_original(tmp.path(), "reports/scan.pdf").unwrap() {
+            Original::Binary(bytes, sha256) => {
+                assert_eq!(bytes, pdf.len() as u64);
+                assert_eq!(sha256, format!("{:x}", Sha256::digest(pdf)));
+            }
+            Original::Text(..) => panic!("binary original read as text"),
+        }
+        assert!(read(tmp.path(), "reports/scan.pdf").is_err());
+        assert!(open_original(tmp.path(), "../outside.pdf").is_err());
+    }
 }
