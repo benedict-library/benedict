@@ -44,7 +44,7 @@ pub const EVENT: Extra<'static> = Extra {
 
 pub(crate) type Fields<'a> = BTreeMap<&'a str, &'a str>;
 
-enum Database {
+pub(crate) enum Database {
     Sqlite(PathBuf),
     Postgres(String),
 }
@@ -55,7 +55,7 @@ pub fn enabled() -> bool {
         || env::var("LIBRARY_DB_URL").is_ok_and(|s| !s.is_empty())
 }
 
-fn backend() -> Result<Database, String> {
+pub(crate) fn backend() -> Result<Database, String> {
     let url = if let Some(file) = env::var_os("LIBRARY_DB_URL_FILE") {
         let contents = std::fs::read_to_string(file)
             .map_err(|_| "cannot read PostgreSQL secret file as the runtime user")?;
@@ -77,16 +77,17 @@ fn backend() -> Result<Database, String> {
         }
         return Err("database secret must contain one PostgreSQL connection URI".into());
     }
+    // Without LIBRARY_DB the database sits beside library.json (/data in the container).
     let path = env::var_os("LIBRARY_DB")
         .map(PathBuf::from)
-        .unwrap_or_else(|| "/data/library.sqlite3".into());
+        .unwrap_or_else(|| crate::rooms::data_dir().join("library.sqlite3"));
     if path.as_os_str().is_empty() || path.as_os_str() == ":memory:" {
         return Err("LIBRARY_DB must be a persistent file".into());
     }
     Ok(Database::Sqlite(path))
 }
 
-fn sqlite(path: &std::path::Path, create: bool) -> Result<Connection, String> {
+pub(crate) fn sqlite(path: &std::path::Path, create: bool) -> Result<Connection, String> {
     let flags = if create {
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE
     } else {
@@ -208,25 +209,52 @@ fn pg_connection(command: &mut Command, uri: &str) -> Result<(), String> {
 
 // psql quotes :'name' as one SQL literal on the active connection. Both the
 // credentials use libpq settings; evidence travels through stdin, including large documents.
-fn postgres(url: &str, sql: &str, fields: &Fields<'_>) -> Result<String, String> {
+pub(crate) fn psql(url: &str) -> Result<Command, String> {
     let mut command = Command::new("psql");
-    command
-        .args(["-X", "-w", "-qAt", "-v", "ON_ERROR_STOP=1"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    command.args(["-X", "-w", "-qAt", "-v", "ON_ERROR_STOP=1"]);
     pg_connection(&mut command, url)?;
-    let mut script = String::new();
+    Ok(command)
+}
+
+/// Set psql variables. Keys are internal field names. Hex avoids interpolation of user text or psql
+/// commands. Setting a variable from a query also avoids the OS size limit on environment values.
+pub(crate) fn pg_variables(script: &mut String, fields: &Fields<'_>) {
+    use std::fmt::Write as _;
     for (key, value) in fields {
-        // Keys are internal field names. Hex avoids interpolation of user text or psql commands.
-        // Setting a variable from a query also avoids the OS size limit on environment values.
-        use std::fmt::Write as _;
         script.push_str("SELECT convert_from(decode('");
         for byte in value.bytes() {
             write!(script, "{byte:02x}").unwrap();
         }
         writeln!(script, "', 'hex'), 'UTF8') AS {key} \\gset").unwrap();
     }
+}
+
+// A database error can quote a password from the URI or user content, so only its SQLSTATE is shown.
+pub(crate) fn pg_failure(status: std::process::ExitStatus, stderr: &[u8]) -> String {
+    let state = stderr.split(|byte| *byte == b'\n').find_map(|line| {
+        let line = std::str::from_utf8(line).ok()?;
+        let (_, rest) = line.split_once("ERROR:  ")?;
+        let code = rest.get(..5)?;
+        (code
+            .bytes()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+            && rest.as_bytes().get(5) == Some(&b':'))
+        .then_some(code)
+    });
+    format!(
+        "PostgreSQL operation failed (psql {status}, SQLSTATE {}); check the connection, schema and permissions",
+        state.unwrap_or("unavailable")
+    )
+}
+
+fn postgres(url: &str, sql: &str, fields: &Fields<'_>) -> Result<String, String> {
+    let mut command = psql(url)?;
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut script = String::new();
+    pg_variables(&mut script, fields);
     script.push_str("\\set VERBOSITY verbose\n");
     script.push_str(sql);
     let mut child = command
@@ -239,22 +267,7 @@ fn postgres(url: &str, sql: &str, fields: &Fields<'_>) -> Result<String, String>
         .write_all(script.as_bytes());
     let result = child.wait_with_output().map_err(|e| e.to_string())?;
     if !result.status.success() {
-        // A database error can quote a password from the URI or user content.
-        let state = result.stderr.split(|byte| *byte == b'\n').find_map(|line| {
-            let line = std::str::from_utf8(line).ok()?;
-            let (_, rest) = line.split_once("ERROR:  ")?;
-            let code = rest.get(..5)?;
-            (code
-                .bytes()
-                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
-                && rest.as_bytes().get(5) == Some(&b':'))
-            .then_some(code)
-        });
-        return Err(format!(
-            "PostgreSQL operation failed (psql {}, SQLSTATE {}); check the connection, schema and permissions",
-            result.status,
-            state.unwrap_or("unavailable")
-        ));
+        return Err(pg_failure(result.status, &result.stderr));
     }
     write.map_err(|e| e.to_string())?;
     String::from_utf8(result.stdout).map_err(|e| e.to_string())
@@ -318,7 +331,7 @@ pub(crate) fn options<'a>(args: &'a [String], allowed: &[&str]) -> Result<Fields
     Ok(fields)
 }
 
-fn scope<'a>(library: &'a str, project: &'a str) -> Result<Fields<'a>, String> {
+pub(crate) fn scope<'a>(library: &'a str, project: &'a str) -> Result<Fields<'a>, String> {
     if library.trim().is_empty() || project.trim().is_empty() {
         return Err("project and library keys must be nonempty".into());
     }

@@ -1,22 +1,23 @@
+mod common;
 use serde_json::Value;
 use std::{fs, process::Command};
 #[test]
 fn file_preserves_original_and_rejects_unanswered_or_unrelated_rows() {
     let temp = tempfile::tempdir().unwrap();
     let cfg = temp.path().join("library.json");
-    let run = |args: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_benedict"))
-            .args(args)
+    let make = || {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_benedict"));
+        command
             .env_remove("LIBRARY_DB_URL")
-            .env_remove("LIBRARY_ROOM_SOCKET")
+            .env("LIBRARY_ROOM_SOCKET", common::socket(temp.path()))
             .env_remove("LIBRARY_ROOM_HOME")
             .env_remove("LIBRARY_EMBED_URL")
             .env("LIBRARY_CONFIG", &cfg)
             .env("LIBRARY_DB", temp.path().join("evidence.sqlite3"))
-            .env("LIBRARY_PROJECT", "project")
-            .output()
-            .unwrap()
+            .env("LIBRARY_PROJECT", "project");
+        command
     };
+    let run = |args: &[&str]| make().args(args).output().unwrap();
     let success = |args: &[&str]| -> Value {
         let out = run(args);
         assert!(
@@ -27,6 +28,7 @@ fn file_preserves_original_and_rejects_unanswered_or_unrelated_rows() {
         serde_json::from_slice(&out.stdout).unwrap()
     };
     success(&["init"]);
+    let _room = common::Room::start(make);
     success(&["add", "--key", "research"]);
     let q = "Which batch is approved?\nKeep the reason for the next agent.";
     let search = success(&[

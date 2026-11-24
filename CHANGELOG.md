@@ -36,6 +36,16 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reads `golden/LIBRARY.jsonl` by default. A missing golden file is `not_configured`; a bad line is `invalid` with
   its line number. Neither stops the cycle.
 
+- The search room. The librarian and `benedict index` write each library's index to the database: a catalog
+  record per document (title, summary and hash, without the text), word counts and lengths, and one version row
+  (`benedict_catalog`, `benedict_terms`, `benedict_lengths`, `benedict_index_state`; the same tables in SQLite and
+  PostgreSQL). Only changed documents are written again, in one transaction. The room service loads the index into
+  memory and answers `benedict search`, with the same ranking as before; while a new version loads it answers from
+  the old one. Results add up to three catalog records under `catalog`; `hits` are unchanged. The librarian's
+  index step reports the catalog count, distinct words and seconds.
+- The first librarian run after an upgrade compares five questions on the earlier JSON index file and the
+  database. It removes the file when they agree; otherwise the file stays and `index_mismatch` lists the questions.
+
 - Setup asks whether the library starts again when the host restarts (`--autostart on|off`). `on`, the
   recommended answer and the example start's default, gives the room and librarian containers
   `restart: unless-stopped`; `off` sets `restart: "no"` for a trial library. `compose.yaml` uses
@@ -50,6 +60,10 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and sets `filed_at`. Running it again fills only what is missing.
 - The compose librarian no longer passes the example golden file; only the example start points
   `LIBRARY_GOLDEN` at it.
+- Search goes through the search room. Without the room service it fails with `search room not running`, and a
+  library without an index fails with `run index or librarian`; search no longer reads a JSON index file or the
+  wiki files. Without `LIBRARY_DB` the SQLite database sits beside `library.json`. The Python compatibility
+  commands use the Rust search only when `LIBRARY_ROOM_SOCKET` is set and otherwise search their own index.
 - An upgrade replaces the bundled skill page (`entities/skill_benedict-library.md`) when it is the page an
   earlier version wrote. An edited page stops the installer with a message that says how to keep it.
 - `install-project` asks only where the library starts. For your own wiki it uses SQLite without a
@@ -70,8 +84,7 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   container to start. To upgrade an installed project, delete its `.benedict/library` and run
   `bin/install-project` again with the same workspace.
 - Search is one command, `benedict search`. Without `--library` it also returns, under `near`, the top hits of
-  each library the central library `reads`. A library whose prebuilt index is missing, damaged or made for other
-  files is searched in its wiki files directly, and `fallback` says why. `--web` runs the deployment's
+  each library the central library `reads`, or that library's error. `--web` runs the deployment's
   `LIBRARY_WEB_CMD` with the library key and search terms after the inside results and puts its output under
   `web`; without it nothing leaves the library. The Python `bin/search.py` and its room code
   `rooms/room_query.py` are removed, and room-side search (side sections, box libraries, vector hits) is not
