@@ -726,7 +726,10 @@ pub fn run(cmd: &str, args: &[String]) -> Result<Option<i32>> {
                     "reading",
                     question,
                     "",
-                    output["text"].as_str().ok_or("missing text")?,
+                    output["text"]
+                        .as_str()
+                        .or_else(|| output["note"].as_str())
+                        .ok_or("missing text")?,
                     output["path"].as_str().ok_or("missing source")?,
                 )?["id"]
                     .clone()
