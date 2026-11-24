@@ -3,7 +3,7 @@ x-runtime: &runtime
   image: ${LIBRARY_IMAGE:-benedict-local}
   build: .
   user: "10001:10001"
-  mem_limit: ${LIBRARY_MEMORY_LIMIT:-512m}
+  mem_limit: ${LIBRARY_MEMORY_LIMIT:-1g}
 
 x-library-mounts: &library-mounts
   - library_data:/data

@@ -5,8 +5,8 @@ use std::fs;
 
 use std::path::{Component, Path};
 
-/// The memory answer "default" in the setup questions (wizard: 512MiB로 시작하기).
-const DEFAULT_MEMORY: &str = "512m";
+/// The memory answer "default" in the setup questions (wizard: 1GiB로 시작하기).
+const DEFAULT_MEMORY: &str = "1g";
 
 fn options(args: &[String]) -> Result<BTreeMap<&str, &str>, String> {
     let mut values = BTreeMap::new();
@@ -128,7 +128,7 @@ fn apply_answers(
     opts.insert("--database", db);
     match selected("memory")? {
         "default"
-            if memory_bytes(opts.get("--memory").copied().unwrap_or("512m"))?
+            if memory_bytes(opts.get("--memory").copied().unwrap_or(DEFAULT_MEMORY))?
                 == memory_bytes(DEFAULT_MEMORY)? =>
         {
             opts.insert("--memory", DEFAULT_MEMORY);
@@ -216,7 +216,7 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
         .get("--output")
         .ok_or("missing --output FILE")?
         .to_string();
-    let memory = memory_bytes(opts.get("--memory").copied().unwrap_or("512m"))?;
+    let memory = memory_bytes(opts.get("--memory").copied().unwrap_or(DEFAULT_MEMORY))?;
     // The example start keeps its one line and takes the recommended answer.
     let restart = match opts.get("--autostart").copied().unwrap_or("on") {
         "on" => "unless-stopped",
@@ -449,23 +449,18 @@ fn activate(data: &Path) -> Result<(), String> {
 }
 
 /// Memory limit in MiB for a wiki of this size, and whether it fits in two thirds of Docker's memory.
-/// The steps follow measured first installs: 2,285 pages (35 MB) indexed at 1 GiB, 21,706 pages
-/// (135 MB) at 2 GiB, and 42,000 pages (540 MB) were killed at 512 MiB and indexed at 3 GiB.
-/// Beyond that, each further 20,000 pages adds 1 GiB. The installer retries with a larger limit if
-/// initial indexing still runs out of memory.
+/// Indexing reads one document at a time and the search room holds no document text. Measured: a
+/// wiki of 42,000 files (540 MB, 31,162 indexed documents) indexed within 1 GiB at a peak of 0.82 GB
+/// with the page cache, and its search room held 0.2 GB. Beyond 50,000 pages or 700 MB, each further
+/// 50,000 pages adds 1 GiB. The installer retries with a larger limit if initial indexing still runs
+/// out of memory.
 fn recommend_memory(pages: u64, bytes: u64, docker: u64) -> (u64, bool) {
     const MIB: u64 = 1024 * 1024;
     let mb = bytes / MIB;
-    let need = if pages <= 1_000 && mb <= 20 {
-        512
-    } else if pages <= 5_000 && mb <= 100 {
+    let need = if pages <= 50_000 && mb <= 700 {
         1024
-    } else if pages <= 25_000 && mb <= 300 {
-        2048
-    } else if pages <= 50_000 && mb <= 700 {
-        3072
     } else {
-        3072 + 1024 * pages.saturating_sub(50_000).div_ceil(20_000).max(1)
+        1024 + 1024 * pages.saturating_sub(50_000).div_ceil(50_000).max(1)
     };
     let cap = docker / MIB / 3 * 2;
     if docker == 0 || need <= cap {
@@ -505,7 +500,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     }
     if args == ["--help"] || args.is_empty() {
         println!(
-            "setup --project NAME --output FILE [--memory 512m] [--database sqlite|postgres] [--database-secret-file /host/secret] [--answers INTERVIEW.json] [--start empty|example] [--wiki /host/wiki] [--shelf /host/shelf] [--autostart on|off]\nsetup --activate\nsetup --recommend-memory --pages N --bytes N --docker-memory N"
+            "setup --project NAME --output FILE [--memory 1g] [--database sqlite|postgres] [--database-secret-file /host/secret] [--answers INTERVIEW.json] [--start empty|example] [--wiki /host/wiki] [--shelf /host/shelf] [--autostart on|off]\nsetup --activate\nsetup --recommend-memory --pages N --bytes N --docker-memory N"
         );
         return Ok(());
     }
@@ -542,13 +537,14 @@ mod tests {
     fn recommends_memory_from_measured_wiki_sizes() {
         const MIB: u64 = 1024 * 1024;
         let docker = 32 * 1024 * MIB;
-        assert_eq!(recommend_memory(5, MIB, docker), (512, true));
+        assert_eq!(recommend_memory(5, MIB, docker), (1024, true));
         assert_eq!(recommend_memory(2_285, 35 * MIB, docker), (1024, true));
-        assert_eq!(recommend_memory(21_706, 135 * MIB, docker), (2048, true));
-        assert_eq!(recommend_memory(42_064, 540 * MIB, docker), (3072, true));
-        assert_eq!(recommend_memory(90_000, 900 * MIB, docker), (5120, true));
-        // A Docker VM of 3 GiB leaves 2 GiB for the library.
-        assert_eq!(recommend_memory(42_064, 540 * MIB, 3 * 1024 * MIB), (2048, false));
+        assert_eq!(recommend_memory(21_706, 135 * MIB, docker), (1024, true));
+        assert_eq!(recommend_memory(42_064, 540 * MIB, docker), (1024, true));
+        assert_eq!(recommend_memory(90_000, 900 * MIB, docker), (2048, true));
+        assert_eq!(recommend_memory(160_000, 2_000 * MIB, docker), (4096, true));
+        // A Docker VM of 1.5 GiB leaves 1 GiB for the library.
+        assert_eq!(recommend_memory(90_000, 900 * MIB, 1536 * MIB), (1024, false));
         assert!(recommend(&args(&["--pages", "x"])).is_err());
     }
 
@@ -798,7 +794,7 @@ mod tests {
         let mut none = wiki();
         apply_answers(&mut none, &answers("wiki", Some("none"))).unwrap();
         assert_eq!(none["--shelf"], "none");
-        assert_eq!(none["--memory"], "512m");
+        assert_eq!(none["--memory"], "1g");
         let mut conflict = BTreeMap::from([("--wiki", "/srv/wiki"), ("--shelf", "/srv/x")]);
         assert!(apply_answers(&mut conflict, &answers("wiki", Some("none"))).is_err());
         let mut example = BTreeMap::new();

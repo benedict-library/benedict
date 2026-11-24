@@ -1,6 +1,7 @@
 // One search command covers what an agent needs before it answers: the central library and the libraries it may
-// read, a direct search of the wiki files when a prebuilt index cannot be used (said in the result, never silent),
-// and, only when asked with --web, the configured web step after the inside results.
+// read, answered by the search room from each library's index, and, only when asked with --web, the configured web
+// step after the inside results. A library without an index is not searched in its files; the error says so.
+mod common;
 use serde_json::{Value, json};
 use std::{
     fs,
@@ -10,7 +11,10 @@ use std::{
 
 fn benedict(data: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_benedict"));
-    command.args(args).current_dir(data);
+    command
+        .args(args)
+        .current_dir(data)
+        .env("LIBRARY_ROOM_SOCKET", common::socket(data));
     for name in [
         "LIBRARY_DB_URL",
         "LIBRARY_DB_URL_FILE",
@@ -95,6 +99,7 @@ fn without_a_library_the_search_reads_the_central_library_and_only_the_libraries
     let data = temp.path();
     libraries(data);
     index_all(data);
+    let _room = common::Room::start(|| benedict(data, &[]));
     let found = ok(data, &["search", "garden"]);
     assert_eq!(found["library"], "main");
     assert_eq!(paths(&found), ["entities/garden.md"]);
@@ -115,35 +120,28 @@ fn without_a_library_the_search_reads_the_central_library_and_only_the_libraries
 }
 
 #[test]
-fn a_library_whose_index_cannot_be_used_is_searched_in_its_wiki_files_and_the_result_says_so() {
+fn a_library_without_an_index_is_not_searched_and_the_error_says_how_to_build_one() {
     let temp = tempfile::tempdir().unwrap();
     let data = temp.path();
     libraries(data);
-    // No index yet: the search still answers from the files, inside the library's dirs.
+    let _room = common::Room::start(|| benedict(data, &[]));
+    // No index yet: nothing reads the wiki files instead.
+    let out = benedict(data, &["search", "garden"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let error = String::from_utf8_lossy(&out.stderr);
+    assert!(error.contains("run index or librarian"), "{error}");
+    // A library the central one may read and that has no index says so in its row.
+    ok(data, &["index", "--library", "main"]);
     let found = ok(data, &["search", "garden"]);
     assert_eq!(paths(&found), ["entities/garden.md"]);
-    let why = found["fallback"].as_str().unwrap();
-    assert!(why.contains("index missing") && why.contains("wiki files directly"), "{why}");
-    assert_eq!(found["indexed_at"], Value::Null);
-    assert_eq!(paths(near(&found, "branch")), ["notes/garden.md"]);
-    assert!(near(&found, "branch")["fallback"].is_string());
-    // A damaged or mismatched index is not trusted either.
-    index_all(data);
-    for entry in fs::read_dir(data.join(".library-state")).unwrap() {
-        let path = entry.unwrap().path();
-        if path.to_string_lossy().ends_with("-index.json") {
-            fs::write(path, "[]").unwrap();
-        }
-    }
-    let damaged = ok(data, &["search", "--library", "branch", "planting"]);
-    assert_eq!(paths(&damaged), ["notes/garden.md"]);
-    assert!(damaged["fallback"].as_str().unwrap().contains("rebuild"));
-    // After the librarian rebuilds the index, the index answers again and nothing is said.
+    let why = near(&found, "branch")["error"].as_str().unwrap();
+    assert!(why.contains("index missing"), "{why}");
+    // After the librarian builds every index, every library answers.
     index_all(data);
     let rebuilt = ok(data, &["search", "garden"]);
-    assert!(rebuilt.get("fallback").is_none());
     assert!(rebuilt["indexed_at"].is_string());
-    assert!(near(&rebuilt, "branch").get("fallback").is_none());
+    assert_eq!(paths(near(&rebuilt, "branch")), ["notes/garden.md"]);
+    assert!(near(&rebuilt, "branch").get("error").is_none());
     // A question without words, or an unknown library, is still refused.
     assert_eq!(benedict(data, &["search", "--", "!!"]).output().unwrap().status.code(), Some(2));
     assert_eq!(
@@ -159,6 +157,7 @@ fn the_web_step_runs_only_when_asked_after_the_inside_results_and_receives_only_
     let data = temp.path();
     libraries(data);
     index_all(data);
+    let _room = common::Room::start(|| benedict(data, &[]));
     // Not configured: the inside results stay, the step says how to keep a public source, exit 1.
     let unset = result(benedict(data, &["search", "--web", "garden"]).output().unwrap(), 1);
     assert_eq!(paths(&unset), ["entities/garden.md"]);

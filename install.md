@@ -39,7 +39,7 @@ The installer prints one line per step and takes care of these choices:
 
 | Choice | Default | What the installer checks |
 | --- | --- | --- |
-| Memory limit | From the wiki size (512 MiB for small wikis, 2 GiB for about 20,000 pages, 3 GiB for about 40,000), at most two thirds of Docker's memory | If initial indexing runs out of memory, it doubles the limit and tries again |
+| Memory limit | 1 GiB per container up to about 50,000 pages, 1 GiB more for each further 50,000, at most two thirds of Docker's memory | If initial indexing runs out of memory, it doubles the limit and tries again |
 | Wiki access | — | Writes a test file as UID 10001, the account the library runs as |
 | Database | SQLite in the project's data volume | — |
 | Shelf | None | — |
@@ -61,7 +61,7 @@ To retry, run the installer again with the same options. Once step 3 has written
 
 ## 5. Show the summary
 
-The summary lists where the library started from, the number of indexed documents, the memory limit and why, the database, the librarian and what happens after a reboot, with the options that change each of them. Show it to the user as it is. Then run `PROJECT/.benedict/library room ping` and report the result.
+When the room service starts, the search room loads the index into memory (about 12 seconds for 31,000 documents); a search in that time fails with `still loading the index` and works when repeated. The summary lists where the library started from, the number of indexed documents, the memory limit and why, the database, the librarian and what happens after a reboot, with the options that change each of them. Show it to the user as it is. Then run `PROJECT/.benedict/library room ping` and report the result.
 
 ## Upgrading an installed library
 
