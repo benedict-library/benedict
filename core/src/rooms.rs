@@ -225,7 +225,15 @@ impl LiveMemory {
 
     /// Append one event to today's transcript before anything else sees it.
     /// A request ID already written today or yesterday returns its earlier line.
-    fn transcribe(&mut self, library: &str, room: &str, mut event: Value) -> Result<(Value, bool)> {
+    fn transcribe(&mut self, library: &str, room: &str, event: Value) -> Result<(Value, bool)> {
+        let (event, duplicate) = self.write_turn(library, room, event)?;
+        if !duplicate {
+            self.remember(library, room, &event)?;
+        }
+        Ok((event["turn"].clone(), duplicate))
+    }
+
+    fn write_turn(&mut self, library: &str, room: &str, mut event: Value) -> Result<(Value, bool)> {
         name_part(library, "library")?;
         name_part(room, "room")?;
         let request = event["request"].as_str().unwrap_or("").to_owned();
@@ -233,7 +241,7 @@ impl LiveMemory {
             for days_ago in [0, 1] {
                 let relative = format!("{}/{library}-{room}.jsonl", day_folder(days_ago));
                 if let Some(line) = self.day_file(&relative)?.requests.get(&request) {
-                    return Ok((json!({"file":relative,"line":line}), true));
+                    return Ok((json!({"turn":{"file":relative,"line":line}}), true));
                 }
             }
         }
@@ -259,8 +267,7 @@ impl LiveMemory {
         if !request.is_empty() {
             state.requests.insert(request, line);
         }
-        self.remember(library, room, &event)?;
-        Ok((event["turn"].clone(), false))
+        Ok((event, false))
     }
 
     fn usage(&self) -> Value {
@@ -307,8 +314,9 @@ impl LiveMemory {
                 let event = json!({"at":at(),"session":extra.session,"role":extra.kind,
                     "question":text("question")?,"query":text("query")?,"answer":text("answer")?,
                     "source":text("source")?,"turns":extra.turns});
-                self.transcribe(library, room, event)?;
-                records::persist(
+                // The transcript line comes first; memory keeps it with the database ID.
+                let (mut event, _) = self.write_turn(library, room, event)?;
+                let saved = records::persist(
                     library,
                     room,
                     text("question")?,
@@ -316,7 +324,10 @@ impl LiveMemory {
                     text("answer")?,
                     text("source")?,
                     &extra,
-                )
+                )?;
+                event["id"] = saved["id"].clone();
+                self.remember(library, room, &event)?;
+                Ok(saved)
             }
             "memory" => Ok(
                 json!({"project":project,"library":text("library")?,"room":text("room")?,
