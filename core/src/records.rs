@@ -100,8 +100,22 @@ pub(crate) fn sqlite(path: &std::path::Path, create: bool) -> Result<Connection,
     if create {
         // In WAL mode readers do not block writers. The librarian and the room read for seconds
         // on a large library (counting words, loading an index); a write meanwhile must not wait.
-        db.pragma_update(None, "journal_mode", "WAL")
+        // Switching an earlier database needs a moment without other connections. While the room
+        // is reading, this connection works in the current mode and a later one switches.
+        let mode: String = db
+            .query_row("PRAGMA journal_mode", [], |r| r.get(0))
             .map_err(|e| format!("open evidence database: {e}"))?;
+        if !mode.eq_ignore_ascii_case("wal") {
+            db.busy_timeout(Duration::ZERO).map_err(|e| e.to_string())?;
+            let switched = db.query_row("PRAGMA journal_mode=WAL", [], |r| r.get::<_, String>(0));
+            db.busy_timeout(Duration::from_secs(10))
+                .map_err(|e| e.to_string())?;
+            match switched {
+                Ok(_) => {}
+                Err(rusqlite::Error::SqliteFailure(e, _)) if e.code == rusqlite::ErrorCode::DatabaseBusy => {}
+                Err(e) => return Err(format!("open evidence database: {e}")),
+            }
+        }
         let named = |table: &str| {
             db.query_row(
                 "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",

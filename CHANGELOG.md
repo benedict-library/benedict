@@ -101,7 +101,8 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The SQLite database uses WAL mode, so long reads no longer block writes. On 31,164 pages, counting the index's
   words takes 11 seconds and loading the index into the room takes 8. Under the earlier rollback journal, a search
   recorded during either read waited ten seconds and failed with `database is locked`. An existing database switches
-  the first time it is opened for writing.
+  when it is opened for writing and no other connection is reading it; until then it keeps its earlier mode, so an
+  upgrade does not fail while the room loads the index.
 - Indexing reads every page before it opens the write transaction and then writes only the changed pages
   (up to 2,000; a larger change is written while it is read, as on a first index). Before, the transaction
   stayed open for the whole read, so with SQLite a search recorded during the librarian's cycle waited
