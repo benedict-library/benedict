@@ -260,27 +260,58 @@ fn the_librarian_removes_the_json_index_only_when_results_agree() {
             "counts":{"alpha.md":{"alpha":alpha_count,"beta":1},"beta.md":{"beta":2}},
             "lengths":{"alpha.md":alpha_count + 1,"beta.md":2}})
     };
-    // An index path is named from the registry path and key, as earlier releases named it.
-    let state = library.path().join(".library-state");
-    let name = {
-        use sha2::{Digest, Sha256};
-        let registry = fs::canonicalize(library.path().join("library.json")).unwrap();
-        let hash = Sha256::digest(format!("{}\0main", registry.display()).as_bytes());
-        format!("{:.16}-index.json", format!("{hash:x}"))
-    };
-    let librarian = || {
-        // Without a golden file the cycle ends with status 1; its row holds the steps.
-        let out = library.call(&["librarian", "--iterations", "1", "--interval", "1"]);
-        let rows = String::from_utf8(out.stdout).unwrap();
-        serde_json::from_str::<Value>(rows.lines().last().unwrap()).unwrap()
-    };
-    fs::write(state.join(&name), earlier(5).to_string()).unwrap();
-    let row = librarian();
+    let file = old_json(&library);
+    fs::write(&file, earlier(5).to_string()).unwrap();
+    let row = librarian_row(&library);
     assert_eq!(row["steps"]["index"]["json_index"]["removed"], false, "{row}");
     assert!(row["steps"]["index"]["json_index"]["index_mismatch"].as_array().is_some_and(|v| !v.is_empty()));
-    assert!(state.join(&name).exists());
-    fs::write(state.join(&name), earlier(2).to_string()).unwrap();
-    let row = librarian();
+    assert!(file.exists());
+    fs::write(&file, earlier(2).to_string()).unwrap();
+    let row = librarian_row(&library);
     assert_eq!(row["steps"]["index"]["json_index"]["removed"], true, "{row}");
-    assert!(!state.join(&name).exists());
+    assert!(!file.exists());
+}
+
+#[test]
+fn pages_changed_since_the_json_index_are_left_out_of_the_comparison() {
+    // The JSON file was written before alpha.md changed, gone.md was removed and delta.md was added.
+    // Those pages shift every score, so only the pages both indexes hold the same are compared.
+    let library = Library::new();
+    fs::create_dir_all(library.path().join("wiki")).unwrap();
+    fs::write(library.path().join("wiki/alpha.md"), "# Alpha\n\nalpha beta\n").unwrap();
+    fs::write(library.path().join("wiki/beta.md"), "# Beta\n\nbeta\n").unwrap();
+    fs::write(library.path().join("wiki/delta.md"), "# Delta\n\ndelta beta\n").unwrap();
+    fs::write(
+        library.path().join("library.json"),
+        json!({"version":1,"libraries":{"main":{"wiki_root":"wiki","central":true}}}).to_string(),
+    )
+    .unwrap();
+    library.ok(&["index"]);
+    let root = fs::canonicalize(library.path().join("wiki")).unwrap();
+    let file = old_json(&library);
+    let earlier = json!({"version":1,"root":root,"shelf_root":null,"indexed_at":"2025-01-01T00:00:00+00:00",
+        "documents":{"alpha.md":"# Alpha\n\nalpha\n","beta.md":"# Beta\n\nbeta\n","gone.md":"# Gone\n\nbeta gone\n"},
+        "counts":{"alpha.md":{"alpha":2},"beta.md":{"beta":2},"gone.md":{"beta":1,"gone":2}},
+        "lengths":{"alpha.md":2,"beta.md":2,"gone.md":3}});
+    fs::write(&file, earlier.to_string()).unwrap();
+    let row = librarian_row(&library);
+    let json_index = &row["steps"]["index"]["json_index"];
+    assert_eq!(json_index["removed"], true, "{row}");
+    assert_eq!(json_index["changed_since_json"], 3, "{row}");
+    assert!(!file.exists());
+}
+
+/// The JSON index path of earlier releases, named from the registry path and key.
+fn old_json(library: &Library) -> PathBuf {
+    use sha2::{Digest, Sha256};
+    let registry = fs::canonicalize(library.path().join("library.json")).unwrap();
+    let hash = Sha256::digest(format!("{}\0main", registry.display()).as_bytes());
+    library.path().join(".library-state").join(format!("{:.16}-index.json", format!("{hash:x}")))
+}
+
+/// One librarian cycle. Without a golden file it ends with status 1; its row holds the steps.
+fn librarian_row(library: &Library) -> Value {
+    let out = library.call(&["librarian", "--iterations", "1", "--interval", "1"]);
+    let rows = String::from_utf8(out.stdout).unwrap();
+    serde_json::from_str::<Value>(rows.lines().last().unwrap()).unwrap()
 }
