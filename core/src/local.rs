@@ -334,7 +334,7 @@ impl EvaluationCorpus {
         search_one(&self.registry, &self.key, query, top)
     }
     pub fn read(&self, path: &str) -> Result<Value> {
-        read(&self.registry, &self.key, path)
+        read(&self.registry, &self.key, path, None)
     }
 }
 
@@ -491,7 +491,8 @@ fn search_one(reg: &Registry, key: &str, query: &str, top: usize) -> Result<Valu
         let title = text.lines().find(|s| s.starts_with("# ")).map(|s| s.trim_start_matches(['#',' '])).unwrap_or(path);
         json!({"path":path,"title":title,"score":(score*1e6).round_ties_even()/1e6,"excerpt":text.chars().take(500).collect::<String>()})
     }).collect();
-    let mut result = json!({"library":key,"engine":"lexical-bm25","indexed_at":indexed_at,"hits":hits});
+    let mut result =
+        json!({"library":key,"engine":"lexical-bm25","indexed_at":indexed_at,"hits":hits});
     if hits_empty(&result) {
         let korean_query = words.iter().any(|w| w.chars().any(hangul));
         let korean_documents = vocabulary.iter().any(|w| w.chars().any(hangul));
@@ -519,7 +520,11 @@ fn hangul(c: char) -> bool {
 fn stem<'a>(word: &str, vocabulary: &BTreeSet<&'a str>) -> Option<&'a str> {
     let length = word.chars().count();
     let ends: Vec<usize> = if length >= 2 && word.chars().all(hangul) {
-        word.char_indices().map(|(i, _)| i).skip(2).chain([word.len()]).collect()
+        word.char_indices()
+            .map(|(i, _)| i)
+            .skip(2)
+            .chain([word.len()])
+            .collect()
     } else if length >= 4 {
         vec![word.len()]
     } else {
@@ -543,7 +548,7 @@ fn prefixed(counter: &serde_json::Map<String, Value>, stem: &str) -> Option<Opti
     Some(sum)
 }
 
-fn read(reg: &Registry, key: &str, path: &str) -> Result<Value> {
+fn read(reg: &Registry, key: &str, path: &str, pages: Option<&str>) -> Result<Value> {
     let root = reg.root(key)?;
     if let Some(name) = path.strip_prefix("shelf:") {
         let shelf = reg
@@ -553,10 +558,25 @@ fn read(reg: &Registry, key: &str, path: &str) -> Result<Value> {
             crate::shelf::Original::Text(text, sha256) => {
                 json!({"library":key, "path":path, "text":text, "sha256":sha256})
             }
-            crate::shelf::Original::Binary(bytes, sha256) => json!({
-                "library":key, "path":path, "binary":true, "bytes":bytes, "sha256":sha256,
-                "note":"Not a text original. Open this file from the shelf directly."
-            }),
+            crate::shelf::Original::Binary(bytes, sha256) => {
+                let converted = match pages {
+                    Some(p) => crate::shelf::convert(&bytes, name, p)?.map(|text| (p, text)),
+                    None => None,
+                };
+                match converted {
+                    Some((p, text)) => json!({
+                        "library":key, "path":path, "pages":p, "text":text, "sha256":sha256
+                    }),
+                    None => json!({
+                        "library":key, "path":path, "binary":true, "bytes":bytes.len(), "sha256":sha256,
+                        "note": if std::env::var_os("BENEDICT_KORDOC").is_some() {
+                            format!("Not a text original. Read part of it with --pages, e.g. --pages 1-3 (at most {} pages).", crate::shelf::MAX_PAGES)
+                        } else {
+                            "Not a text original. Open this file from the shelf directly.".to_string()
+                        }
+                    }),
+                }
+            }
         });
     }
     let path = Path::new(path);
@@ -583,7 +603,7 @@ pub fn verify_references(config: &Path, key: &str, references: &str) -> Result<(
         let line = line.trim();
         // Comma + space is the legacy list separator. Keep a filename that
         // contains a comma as one item when the complete path exists.
-        let candidates: Vec<_> = if line.contains(", ") && read(&reg, key, line).is_err() {
+        let candidates: Vec<_> = if line.contains(", ") && read(&reg, key, line, None).is_err() {
             line.split(", ").map(str::trim).collect()
         } else {
             vec![line]
@@ -594,7 +614,7 @@ pub fn verify_references(config: &Path, key: &str, references: &str) -> Result<(
                     && !value.contains("://")
                     && !Path::new(value).is_absolute())
             {
-                read(&reg, key, value).map_err(|e| format!("invalid local evidence: {e}"))?;
+                read(&reg, key, value, None).map_err(|e| format!("invalid local evidence: {e}"))?;
             }
         }
     }
@@ -610,6 +630,7 @@ pub fn run(cmd: &str, args: &[String]) -> Result<Option<i32>> {
     let mut top = 5;
     let mut lang = "en";
     let mut question = "";
+    let mut pages = None;
     let mut pos = Vec::new();
     let mut literal = false;
     let mut args = args.iter();
@@ -641,6 +662,7 @@ pub fn run(cmd: &str, args: &[String]) -> Result<Option<i32>> {
             ("index" | "search" | "read", "--config") => config = value()?,
             ("index" | "search" | "read", "--library") => key = Some(value()?),
             ("search" | "read", "--question") => question = value()?,
+            ("read", "--pages") => pages = Some(value()?),
             ("search", "--top") => {
                 top = value()?
                     .parse::<usize>()
@@ -674,7 +696,7 @@ pub fn run(cmd: &str, args: &[String]) -> Result<Option<i32>> {
     }
     let name = reg.key(key)?;
     let mut output = match cmd {
-        "read" => read(&reg, name, pos[0])?,
+        "read" => read(&reg, name, pos[0], pages)?,
         "index" => build_index(&reg, name)?,
         _ => search_one(&reg, name, pos[0], top)?,
     };
@@ -691,6 +713,10 @@ pub fn run(cmd: &str, args: &[String]) -> Result<Option<i32>> {
             }
             output["near"] = Value::Array(near);
         }
+    }
+    if cmd != "index" {
+        // Mask before the result is recorded or printed, so neither keeps the values.
+        crate::redact::value(&mut output);
     }
     if crate::records::enabled() {
         match cmd {
