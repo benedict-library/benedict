@@ -44,5 +44,17 @@ services:
     restart: ${LIBRARY_RESTART:-unless-stopped}
     command: [librarian, --config, /data/library.json, --iterations, "365", --interval, "86400"]
     volumes: *library-mounts
+  gate:
+    # Off unless asked for: `--profile gate`. Search and read only; see docs/gate.md.
+    profiles: [gate]
+    <<: *runtime
+    environment:
+      LIBRARY_ROOM_SOCKET: /data/rooms.sock
+    depends_on:
+      room:
+        condition: service_healthy
+    restart: ${LIBRARY_RESTART:-unless-stopped}
+    command: [gate, --listen, "0.0.0.0:8740"]
+    volumes: *library-mounts
 volumes:
   library_data:

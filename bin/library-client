@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""Search and read a Benedict library from another container through its gate.
+
+  library-client search "refund window"
+  library-client read entities/refund.md
+  library-client read --pages 1-3 shelf:report.pdf
+
+The gate address comes from BENEDICT_GATE (HOST:PORT). Standard library only.
+"""
+import json
+import os
+import socket
+import sys
+
+
+def main(argv):
+    if len(argv) < 2 or argv[0] not in ("search", "read"):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    address = os.environ.get("BENEDICT_GATE", "")
+    host, _, port = address.rpartition(":")
+    if not host or not port.isdigit():
+        print("set BENEDICT_GATE to the gate's HOST:PORT", file=sys.stderr)
+        return 2
+    request = json.dumps({"cmd": argv[0], "args": argv[1:]}, ensure_ascii=False) + "\n"
+    with socket.create_connection((host, int(port)), timeout=130) as conn:
+        conn.sendall(request.encode())
+        reply = conn.makefile(encoding="utf-8").readline()
+    print(reply, end="")
+    try:
+        return 1 if "error" in json.loads(reply) else 0
+    except ValueError:
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
