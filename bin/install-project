@@ -47,9 +47,9 @@ if [[ $progress == json ]]; then exec 3>&1 1>&2; fi
 emit() { if [[ $progress == json ]]; then printf '%s\n' "$1" >&3; fi; }
 begin() {
   step=$((step + 1)) step_id=$1
-  emit "$(jq -cn --argjson step "$step" --argjson steps "$steps" --arg id "$1" --arg label "$2" \
+  emit "$(jq -cn --argjson step "$step" --argjson steps "$steps" --arg id "$1" --arg text "$2" \
     --argjson elapsed "$(( $(date +%s) - started ))" \
-    '{event:"step",step:$step,steps:$steps,id:$id,label:$label,elapsed:$elapsed}')"
+    '{event:"step",step:$step,steps:$steps,id:$id,label:$text,elapsed:$elapsed}')"
 }
 failed() {
   emit "$(jq -cn --argjson step "$step" --arg id "$step_id" --argjson exit "$1" \
