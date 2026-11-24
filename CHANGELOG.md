@@ -98,6 +98,10 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Indexing reads every page before it opens the write transaction and then writes only the changed pages
+  (up to 2,000; a larger change is written while it is read, as on a first index). Before, the transaction
+  stayed open for the whole read, so with SQLite a search recorded during the librarian's cycle waited
+  ten seconds and failed with `database is locked` (measured on 31,164 pages: a 13-second read).
 - Upgrading a library installed from your own wiki by an earlier installer no longer points its librarian at the
   bundled example golden questions. `install-project` clears `LIBRARY_GOLDEN` in such a profile, as new profiles
   already do, so the librarian reads `golden/LIBRARY.jsonl` and reports `not_configured` without one.
