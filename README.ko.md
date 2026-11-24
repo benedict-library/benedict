@@ -51,7 +51,7 @@ cd benedict
 bin/install-project --start example ~/projects/notes
 ```
 
-`~/projects/notes`는 내 프로젝트 폴더로 바꿉니다(폴더가 없으면 먼저 만드세요). 예제에는 예제 서가가 딸려 옵니다. 내 위키로 시작하려면 `--start example` 대신 설치 질문에 모두 답합니다: `--wiki 위키_폴더 --database sqlite --memory 512m --shelf 원본_폴더`(빈 서가로 시작하려면 `--shelf none`). 답이 빠지면 설치가 멈추고 물어야 할 질문을 보여 줍니다.
+`~/projects/notes`는 내 프로젝트 폴더로 바꿉니다(폴더가 없으면 먼저 만드세요). 예제에는 예제 서가가 딸려 옵니다. 내 위키로 시작하려면 `--start example` 대신 설치 질문에 모두 답합니다: `--wiki 위키_폴더 --database sqlite --memory 512m --shelf 원본_폴더 --autostart on`(빈 서가로 시작하려면 `--shelf none`, 서버를 다시 켠 뒤 직접 올리려면 `--autostart off`). 답이 빠지면 설치가 멈추고 물어야 할 질문을 보여 줍니다.
 
 **3. 연결을 확인합니다.**
 
