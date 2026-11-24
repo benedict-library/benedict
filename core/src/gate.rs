@@ -80,6 +80,10 @@ fn run_one(args: &[String]) -> Value {
     let Ok(program) = std::env::current_exe() else {
         return json!({"error": "gate cannot find its program"});
     };
+    run_program(&program, args)
+}
+
+fn run_program(program: &std::path::Path, args: &[String]) -> Value {
     let child = Command::new(program)
         .args(args)
         .stdin(Stdio::null())
@@ -89,6 +93,14 @@ fn run_one(args: &[String]) -> Value {
     let Ok(mut child) = child else {
         return json!({"error": "gate cannot start the command"});
     };
+    // Read while waiting: a result larger than the pipe buffer would otherwise block the command.
+    let reader = child.stdout.take().map(|mut out| {
+        std::thread::spawn(move || {
+            let mut text = String::new();
+            let _ = out.read_to_string(&mut text);
+            text
+        })
+    });
     let started = Instant::now();
     loop {
         match child.try_wait() {
@@ -102,10 +114,7 @@ fn run_one(args: &[String]) -> Value {
             Err(_) => return json!({"error": "gate lost the command"}),
         }
     }
-    let mut text = String::new();
-    if let Some(mut out) = child.stdout.take() {
-        let _ = out.read_to_string(&mut text);
-    }
+    let text = reader.and_then(|r| r.join().ok()).unwrap_or_default();
     serde_json::from_str(text.trim())
         .unwrap_or_else(|_| json!({"error": "the command gave no result"}))
 }
@@ -178,6 +187,14 @@ mod tests {
             ok(json!({"cmd":"read","args":["entities/refund.md"]})),
             ["read", "entities/refund.md"]
         );
+    }
+
+    #[test]
+    fn a_result_larger_than_the_pipe_buffer_comes_back_whole() {
+        let script =
+            r#"printf '{"text":"'; head -c 200000 /dev/zero | tr '\0' x; printf '"}'"#.to_owned();
+        let reply = run_program(std::path::Path::new("sh"), &["-c".into(), script]);
+        assert_eq!(reply["text"].as_str().map(str::len), Some(200_000));
     }
 
     #[test]
