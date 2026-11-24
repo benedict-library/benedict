@@ -1,0 +1,11 @@
+{
+  "name": "benedict-readers",
+  "private": true,
+  "description": "Converts non-text shelf originals (PDF, HWP, HWPX, DOCX, XLSX, images) to Markdown for read --pages.",
+  "license": "MIT",
+  "dependencies": {
+    "@hyzyla/pdfium": "3.0.0",
+    "kordoc": "4.25.11",
+    "onnxruntime-node": "1.31.1"
+  }
+}

@@ -7,6 +7,20 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `read` and `search` mask personal data before a result is recorded or printed, on the native path and
+  through the compatibility adapter. Korean resident and foreign registration numbers keep the birth date
+  and one digit (`900101-1******`), mobile numbers keep the first and last groups (`010-****-5678`),
+  sole-proprietor business numbers keep three leading and two trailing digits, card, account, passport and
+  driver licence numbers and personal e-mail become labels, and a person's name next to a title or label
+  keeps its first and last syllable (`홍*동`). Corporate business numbers, landlines and role mailboxes such
+  as `info@` stay. Source fields (`path`, `library`, `sha256`) are not changed, so the original can still be
+  opened. A result that masked anything carries `"redacted": N`.
+- `read shelf:PATH --pages 3-5` converts up to five pages of a non-text original (PDF, HWP, HWPX, DOCX,
+  XLSX, image) to Markdown with [kordoc](https://github.com/chrisryugj/kordoc); pages without a text layer
+  are read with kordoc's built-in OCR. Without `--pages` the result describes the original and says how to
+  read part of it. The image pins kordoc and its parts in `readers/package-lock.json` and copies the Node
+  24 LTS binary from the pinned `node` image.
+
 - Setup asks whether the library starts again when the host restarts (`--autostart on|off`). `on`, the
   recommended answer and the example start's default, gives the room and librarian containers
   `restart: unless-stopped`; `off` sets `restart: "no"` for a trial library. `compose.yaml` uses
@@ -36,6 +50,9 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `read shelf:<path>` no longer refuses an original that is not plain text. A PDF, office document
+  or image on the shelf is now described by its size and SHA-256 with `"binary": true`, so an agent
+  can open the file itself instead of being told the original is unreadable.
 - A Docker library bound to your own wiki now gives you read and write access to every page it
   files there. Answers saved through the room and the originals kept by `web-source` were written
   for the container's account only, so the wiki's owner could not open, back up or commit them.

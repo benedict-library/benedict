@@ -8,6 +8,7 @@ mod librarian;
 mod local;
 mod promote;
 mod records;
+mod redact;
 mod rooms;
 mod setup;
 mod shelf;
@@ -52,7 +53,7 @@ fn usage(cmd: &str) -> Option<&'static str> {
         "method" => "method [--lang en|ko]",
         "search" => "search [--config PATH] [--library KEY] [--top N] [--question ORIGINAL] QUERY",
         "read" => {
-            "read [--config PATH] [--library KEY] [--question ORIGINAL] WIKI_PAGE.md|shelf:RELATIVE_PATH"
+            "read [--config PATH] [--library KEY] [--question ORIGINAL] [--pages 3-5] WIKI_PAGE.md|shelf:RELATIVE_PATH"
         }
         "save" => {
             "save [--config PATH] [--library KEY] [--query SEARCH_TERMS] [--refs SOURCES] QUESTION ANSWER"
@@ -121,8 +122,24 @@ fn legacy(cmd: &str, args: &[String]) -> Result<i32, String> {
     } else {
         adapter.arg(dir.join("bin/library.py")).arg(cmd);
     }
+    adapter.args(args);
+    if matches!(cmd, "read" | "search") {
+        // Results that reach an agent are masked here too, as on the native path.
+        let out = adapter
+            .stderr(std::process::Stdio::inherit())
+            .output()
+            .map_err(|e| format!("compatibility adapter {cmd}: {e}"))?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        match serde_json::from_str::<serde_json::Value>(&text) {
+            Ok(mut value) => {
+                redact::value(&mut value);
+                println!("{value}");
+            }
+            Err(_) => print!("{}", redact::mask(&text)),
+        }
+        return Ok(out.status.code().unwrap_or(1));
+    }
     let status = adapter
-        .args(args)
         .status()
         .map_err(|e| format!("compatibility adapter {cmd}: {e}"))?;
     Ok(status.code().unwrap_or(1))
