@@ -64,7 +64,27 @@ pub fn prompt(step: &str, wiki_found: bool) -> Result<Value, String> {
                 ),
             ],
         ),
-        _ => return Err("expected setup question start, database, memory or shelf".into()),
+        // Asked last: a trial library can stay down after a host restart.
+        "autostart" => (
+            "서버를 다시 켜면 도서관도 저절로 켤까요?",
+            vec![
+                choice(
+                    "on",
+                    "시동 때 다시 켜기",
+                    "재부팅 뒤 방과 사서 컨테이너가 저절로 다시 뜹니다. 직접 멈춘 컨테이너는 그대로 둡니다.",
+                ),
+                choice(
+                    "off",
+                    "직접 켤 때만",
+                    "시험처럼 잠깐 쓰는 도서관에 맞습니다. 재부팅 뒤에는 직접 다시 올립니다.",
+                ),
+            ],
+        ),
+        _ => {
+            return Err(
+                "expected setup question start, database, memory, shelf or autostart".into(),
+            );
+        }
     };
     choices[0]["recommended"] = true.into();
     choices.push(choice(
@@ -96,7 +116,7 @@ mod tests {
     #[test]
     fn each_question_fits_the_host_picker() {
         for found in [false, true] {
-            for step in ["start", "database", "memory", "shelf"] {
+            for step in ["start", "database", "memory", "shelf", "autostart"] {
                 let p = prompt(step, found).unwrap();
                 let choices = p["choices"].as_array().unwrap();
                 assert!(choices.len() <= 3);
@@ -112,6 +132,10 @@ mod tests {
                 if step == "shelf" {
                     assert_eq!(choices[0]["id"], "folder");
                     assert!(choices.iter().all(|c| c["id"] != "default"));
+                }
+                if step == "autostart" {
+                    assert_eq!(choices[0]["id"], "on");
+                    assert_eq!(choices[1]["id"], "off");
                 }
             }
         }
