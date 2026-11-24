@@ -5,7 +5,7 @@ use crate::index_store::{self, IndexRow, IndexState};
 use crate::local::{Registry, hangul, read, stem, words};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io::BufRead;
 use std::ops::Bound;
@@ -368,6 +368,39 @@ impl Index {
         }
         questions
     }
+
+    /// The same index without some documents, so two versions can be compared on the documents
+    /// both hold the same: a page that changed in between shifts every score.
+    fn without(self, drop: &HashSet<String>) -> Index {
+        if drop.is_empty() {
+            return self;
+        }
+        let mut ids = vec![None; self.paths.len()];
+        let mut paths = Vec::new();
+        let mut parts: [Vec<String>; 3] = Default::default();
+        let mut lengths = Vec::new();
+        for (doc, path) in self.paths.into_iter().enumerate() {
+            if drop.contains(&path) {
+                continue;
+            }
+            ids[doc] = Some(paths.len() as u32);
+            paths.push(path);
+            parts[0].push(self.titles[doc].clone());
+            parts[1].push(self.summaries[doc].clone());
+            parts[2].push(self.hashes[doc].clone());
+            lengths.push(self.lengths[doc]);
+        }
+        let mut postings = BTreeMap::new();
+        for (word, docs) in self.postings {
+            let docs: Vec<(u32, u32)> =
+                docs.into_iter().filter_map(|(doc, freq)| ids[doc as usize].map(|id| (id, freq))).collect();
+            if !docs.is_empty() {
+                postings.insert(word, docs);
+            }
+        }
+        let state = IndexState { documents: paths.len() as u64, ..self.state };
+        Index::from_parts(state, paths, parts, lengths, postings)
+    }
 }
 
 #[derive(Default)]
@@ -461,29 +494,48 @@ impl SearchRoom {
 }
 
 /// Earlier releases kept the index in a JSON file beside the registry. Once the database holds the
-/// index, the librarian compares five questions on both. When all agree the file is removed;
-/// otherwise it stays and the journal lists the questions that differ.
+/// index, the librarian compares five questions on both, over the pages both indexes hold the same
+/// (pages added, removed or changed since the file was written are left out of both). When all
+/// agree the file is removed; otherwise it stays and the journal lists the questions that differ.
 pub fn retire_json(config: &Path, key: &str) -> Result<Option<Value>> {
     let reg = Registry::open(config)?;
     if !reg.simple()? {
         return Ok(None);
     }
     let file = reg.index_path(key);
-    if !file.is_file() {
+    if !file.is_file() || index_store::state(key)?.is_none() {
         return Ok(None);
     }
+    let unreadable = |e: String| {
+        Ok(Some(json!({"compared":0,"removed":false,
+            "index_mismatch":[format!("old index unreadable: {e}")]})))
+    };
+    let earlier = match old_hashes(&file) {
+        Ok(hashes) => hashes,
+        Err(e) => return unreadable(e),
+    };
+    let current = index_store::hashes(key)?;
+    let changed: HashSet<String> = earlier
+        .iter()
+        .filter(|(path, hash)| current.get(*path) != Some(*hash))
+        .map(|(path, _)| path.clone())
+        .chain(current.keys().filter(|path| !earlier.contains_key(*path)).cloned())
+        .collect();
+    drop((earlier, current));
     let Some(new) = Index::load(key)? else {
         return Ok(None);
     };
+    let new = new.without(&changed);
     let questions = new.questions(5);
     let fresh: Vec<_> = questions.iter().map(|q| new.top_paths(q)).collect();
     drop(new);
+    if questions.is_empty() {
+        return Ok(Some(json!({"compared":0,"removed":false,"changed_since_json":changed.len(),
+            "index_mismatch":["no page is the same in both indexes"]})));
+    }
     let old = match old_index(&file) {
-        Ok(index) => index,
-        Err(e) => {
-            return Ok(Some(json!({"compared":0,"removed":false,
-                "index_mismatch":[format!("old index unreadable: {e}")]})));
-        }
+        Ok(index) => index.without(&changed),
+        Err(e) => return unreadable(e),
     };
     let differ: Vec<&String> = questions
         .iter()
@@ -492,10 +544,29 @@ pub fn retire_json(config: &Path, key: &str) -> Result<Option<Value>> {
         .map(|(q, _)| q)
         .collect();
     if !differ.is_empty() {
-        return Ok(Some(json!({"compared":questions.len(),"removed":false,"index_mismatch":differ})));
+        return Ok(Some(json!({"compared":questions.len(),"removed":false,
+            "changed_since_json":changed.len(),"index_mismatch":differ})));
     }
     fs::remove_file(&file).map_err(|e| e.to_string())?;
-    Ok(Some(json!({"compared":questions.len(),"removed":true})))
+    Ok(Some(json!({"compared":questions.len(),"removed":true,"changed_since_json":changed.len()})))
+}
+
+/// The hash of each document's text in the JSON file of earlier releases, as the database keeps it.
+fn old_hashes(file: &Path) -> Result<HashMap<String, String>> {
+    let input = fs::File::open(file).map_err(|e| e.to_string())?;
+    let mut json = Json {
+        input: std::io::BufReader::with_capacity(1 << 16, input),
+    };
+    let mut hashes = HashMap::new();
+    json.object(&mut |json, key| match key.as_str() {
+        "documents" => json.object(&mut |json, path| {
+            let text = json.text_or_null()?.unwrap_or_default();
+            hashes.insert(path, format!("{:x}", Sha256::digest(text.as_bytes())));
+            Ok(())
+        }),
+        _ => json.skip(),
+    })?;
+    Ok(hashes)
 }
 
 /// Reads the JSON index file one value at a time, so its document text never sits in memory.
