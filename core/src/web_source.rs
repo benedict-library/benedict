@@ -20,6 +20,7 @@ fn field<'a>(r: &'a Value, name: &str) -> Result<&'a str> {
 
 fn commit_file(
     stage: &Path,
+    root: &Path,
     shelf: &Path,
     path: &str,
     digest: &str,
@@ -37,7 +38,7 @@ fn commit_file(
     let target = shelf.join(source.file_name().unwrap());
     files::no_link(&target)?;
     if !target.exists() {
-        let result = files::atomic(&target, &bytes, true);
+        let result = files::create_wiki_page(&target, &bytes, root);
         if !target.exists() {
             result?;
         }
@@ -84,10 +85,10 @@ pub fn run(config: &Path, key: Option<&str>, args: &[String]) -> Result<Value> {
         return Err("invalid archived source digest".into());
     }
     fs::create_dir_all(&shelf).map_err(|e| e.to_string())?;
-    let original = commit_file(&stage_path, &shelf, field(&r, "path")?, digest, true)?;
+    let original = commit_file(&stage_path, &root, &shelf, field(&r, "path")?, digest, true)?;
     let read = match r["text_path"].as_str() {
         Some(path) if path != field(&r, "path")? => {
-            commit_file(&stage_path, &shelf, path, digest, false)?
+            commit_file(&stage_path, &root, &shelf, path, digest, false)?
         }
         _ => original.clone(),
     };
