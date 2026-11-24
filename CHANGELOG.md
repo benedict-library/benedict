@@ -7,6 +7,10 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `benedict gate --listen HOST:PORT` lets agents in other containers search and read a library without
+  Docker access: one JSON line per connection, `search` and `read` with `--top`, `--pages`, `--question` and
+  `--library` only, masked and recorded as on the command line. The `gate` compose service is off unless
+  started with `--profile gate`; `bin/library-client` is a standard-library client. See `docs/gate.md`.
 - `read` and `search` mask personal data before a result is recorded or printed, on the native path and
   through the compatibility adapter. Korean resident and foreign registration numbers keep the birth date
   and one digit (`900101-1******`), mobile numbers keep the first and last groups (`010-****-5678`),
