@@ -79,6 +79,10 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Korean shelf filenames stored decomposed (as macOS and some network stores keep them) are indexed in
+  composed form, and `read shelf:<path>` finds them by the composed name. An original the index cannot
+  open is skipped and counted instead of stopping the whole index; when a skipped name contains `?`, the
+  message says to mount the network share with `iocharset=utf8`.
 - `read shelf:<path>` no longer refuses an original that is not plain text. A PDF, office document
   or image on the shelf is now described by its size and SHA-256 with `"binary": true`, so an agent
   can open the file itself instead of being told the original is unreadable.
