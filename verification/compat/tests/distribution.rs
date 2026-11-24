@@ -166,7 +166,7 @@ fn configured_commands_preserve_os_quoting() {
         "timeout 20 python3 '/x y/z.py' --agent {who}",
         vec!["timeout", "20", "python3", "/x y/z.py", "--agent", "{who}"],
     )]) {
-        let out=checked(Command::new(python()).current_dir(repo_root().join("bin")).args(["-c","import json,sys,search; print(json.dumps(search.split_cmd(sys.argv[1], windows=sys.argv[2]=='1'))) ",line,os]));
+        let out=checked(Command::new(python()).current_dir(repo_root().join("bin")).args(["-c","import json,sys,common; print(json.dumps(common.split_cmd(sys.argv[1], windows=sys.argv[2]=='1'))) ",line,os]));
         assert_eq!(serde_json::from_str::<Vec<String>>(&out).unwrap(), wanted);
     }
 }

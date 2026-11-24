@@ -33,7 +33,7 @@ def main():
 
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    import search  # noqa: E402  (records the use; see search.traced)
+    import common  # noqa: E402  (records the use; see common.traced)
     # The native writer consumes complete Markdown bytes on this private channel.
     # Keep them inside the selected library rather than duplicating them in command traces.
-    sys.exit(main() if "--plan" in sys.argv[1:] else search.traced("librarian", main))
+    sys.exit(main() if "--plan" in sys.argv[1:] else common.traced("librarian", main))

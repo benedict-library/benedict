@@ -9,7 +9,7 @@ lines holding the question words (with one line around), or the --lines range, o
 
 PATH is absolute, or relative to the library's wiki_root (a path whose first folder is another library's wiki
 folder, as search prints for other libraries, resolves under that library). Without --library the central
-library is used. Box libraries read inside their own box. Settings are the same as search.py.
+library is used. Box libraries read inside their own box. Settings are read by bin/common.py.
 
 With --attach, a local absolute file outside all registered roots is
 sent with the code, because the reading room's machine cannot open it; it lands in the same variable.
@@ -20,7 +20,7 @@ import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import search  # noqa: E402  (settings, registry and room access are shared with search)
+import common  # noqa: E402  (settings, registry and room access shared by the room tools)
 
 ROOM_READ = Path(__file__).resolve().parent.parent / "rooms" / "room_read.py"
 HEAD = 20  # lines shown when there are no question words and no range
@@ -64,7 +64,7 @@ def read_code(paths, var, words, lines, local=None, root=None):
 
 def reading_room(cfg, room):
     """The room that holds the text: the room itself, or the reading room a search room points to (ROOM_READS)."""
-    rc, out, err = search.room_exec(cfg, room, READS, 15, 30)
+    rc, out, err = common.room_exec(cfg, room, READS, 15, 30)
     m = re.search(r"^READS ?(.*)$", out, re.M) if rc == 0 else None
     if not m:
         raise SystemExit(f"{room} 실에 못 붙음: rc={rc} {(out or err).strip()[:120]}")
@@ -91,8 +91,8 @@ def main(argv):
             raise SystemExit(__doc__)
     if not var or not args:
         raise SystemExit(__doc__)
-    cfg = search.settings()
-    reg = search.registry(cfg)
+    cfg = common.settings()
+    reg = common.registry(cfg)
     key = key or next(k for k, v in reg.items() if v.get("central"))
     if key not in reg:
         raise SystemExit(f"등록부에 없는 도서관: {key} (있는 것: {' '.join(reg)})")
@@ -126,7 +126,7 @@ def main(argv):
             raise SystemExit(f"{k}는 컨테이너 도서관이다 — 원문은 그 컨테이너 안에서 읽는다")
         room = reading_room(cfg, reg[k]["room"])
         sent = {p: local[p] for p in paths if p in local}
-        rc, out, err = search.room_exec(cfg, room, read_code(paths, var_name(var), words, lines, sent, reg[k]["wiki_root"]), 20, 40)
+        rc, out, err = common.room_exec(cfg, room, read_code(paths, var_name(var), words, lines, sent, reg[k]["wiki_root"]), 20, 40)
         sys.stdout.write(out)
         if rc != 0 or "Traceback" in out:
             print(f"[{room} 열람실 읽기 실패 rc={rc}] {err.strip()[:200]}", file=sys.stderr)
@@ -135,4 +135,4 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(search.traced("reading", lambda: main(sys.argv)))
+    sys.exit(common.traced("reading", lambda: main(sys.argv)))

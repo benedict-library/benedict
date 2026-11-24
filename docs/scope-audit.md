@@ -9,7 +9,7 @@ disabled; those responsibilities may not be relabelled optional to declare the f
 | Required part | Executable implementation | Adapter/example | Remaining limits |
 |---|---|---|---|
 | 1. Registry | `bin/library.py init`; versioned local JSON | `examples/portable.json`; SQL `registry.sql` | No new production registry migration or multi-library authorization server |
-| 2. Search room/search | Persistent local lexical index; `bin/search.py` room client | `bin/room_sync.py` loads bundled room index | Semantic/vector model/provider/DB setup remains optional and unbundled |
+| 2. Search room/search | Persistent local lexical index; `benedict search` | `bin/room_sync.py` loads bundled room index | Semantic/vector model/provider/DB setup remains optional and unbundled |
 | 3. Reading/read | `bin/library.py read`; `bin/read.py` loads original into a named variable | `main-reading` room and `reading_<topic>_<date>` variables | Markdown only; not a PDF/media reader |
 | 4. Filing/save | `bin/library.py save`; quality/rule checks, page and log | Existing SQL-backed `bin/save_query.py` | Multi-file transaction and concurrent-writer coordination incomplete |
 | 5. Room runtime/sync | `bin/room.py`, `runtime/kernel_room.py`, `bin/room_sync.py` | Search/reading/meeting/librarian rooms with snapshots | Trusted code/pickle only; no hostile-code sandbox; no production host cutover |

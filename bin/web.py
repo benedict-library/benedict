@@ -3,7 +3,7 @@
 
 usage: web.py <library key> "question"
 
-bin/search.py --web runs this on the machine that holds the shelf (LIBRARY_WEB_EXEC, LIBRARY_WEB_CMD). Only the
+`benedict search --web` runs this through LIBRARY_WEB_CMD on the machine that holds the shelf. Only the
 question leaves the library, and it is refused first if it looks like a secret, an inside address or a pasted document.
 
 Registry row (library.registry through DATABASE_URL, column options):
@@ -40,7 +40,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import save_query  # noqa: E402
-import search  # noqa: E402
+import common  # noqa: E402
 
 MAX_QUESTION = 300               # a longer question is likely a pasted document
 MAX_SOURCES = 8
@@ -298,7 +298,7 @@ def agent_source(lib, key, question, url):
 def ask_means(cfg, q):
     """-> ({"summary", "sources"}, None) or (None, why). Only the question goes to the means."""
     cmd = cfg.get("LIBRARY_WEB_SEARCH_CMD")
-    rc, out, err = search.run(search.split_cmd(cmd) + [q], "", int(cfg.get("LIBRARY_WEB_SEARCH_TIMEOUT", 360)))
+    rc, out, err = common.run(common.split_cmd(cmd) + [q], "", int(cfg.get("LIBRARY_WEB_SEARCH_TIMEOUT", 360)))
     if rc:
         return None, f"rc={rc} {(err or out).strip()[:200]}"
     try:
@@ -345,7 +345,7 @@ def file_answer(row, q, answer):
         except ValueError as error:  # e.g. the wiki lives on another machine: name a web_save_cmd for it
             return 2, f"거부: {error}"
     # No refs: nobody judged the inside hits on this path, and a refs line would teach rank learning they failed.
-    rc, out, err = search.run(search.split_cmd(cmd) + [q, answer], "", SAVE_TIMEOUT)
+    rc, out, err = common.run(common.split_cmd(cmd) + [q, answer], "", SAVE_TIMEOUT)
     return rc, (out + err).strip()
 
 
@@ -383,7 +383,7 @@ def main(argv, guard=why_not_fetch, clock=datetime.datetime.now):
         raise SystemExit(__doc__)
     key, q = argv[1], argv[2].strip()
     now = clock()
-    cfg, row = search.settings(), save_query.load_row(key)
+    cfg, row = common.settings(), save_query.load_row(key)
     shelf = (row.get("options") or {}).get("web_shelf")
     if not shelf:
         print(f"웹 검색 안 함: {key} 도서관은 등록부에 서가 자리(options.web_shelf)가 없다 — 바깥으로 아무것도 보내지 않았다")
@@ -442,4 +442,4 @@ if __name__ == "__main__":
             print(json.dumps({"error": str(error)}, ensure_ascii=False), file=sys.stderr)
             sys.exit(2)
     else:
-        sys.exit(search.traced("search", lambda: main(sys.argv)))
+        sys.exit(common.traced("search", lambda: main(sys.argv)))

@@ -361,7 +361,7 @@ def _native_text(fn, *args):
 
 class NativeIndex:
     """The room's word postings in Rust (native/src/index.rs) instead of {path: Counter}: put/pop documents, `in`,
-    iteration over paths, and bm25() — the same sums rooms/room_query.py makes over the Python dictionaries.
+    iteration over paths, and bm25() — the same sums as over Python {path: Counter} dictionaries.
     Index names start with _ so room snapshots never hold it; the next sync rebuilds it after a restart."""
 
     def __init__(self):
