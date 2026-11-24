@@ -196,7 +196,7 @@ begin image "Building the library image"
 quiet docker build --quiet --tag "$image" "$repo"
 
 begin check "Checking the wiki and memory"
-pages=0 memory=${given_memory:-512m} memory_note=default fits=true
+pages=0 memory=${given_memory:-1g} memory_note=default fits=true
 docker_memory=$(docker info --format '{{.MemTotal}}' 2>>"$log" || echo 0)
 if [[ -n $wiki ]]; then
   pages=$(find "$wiki" -type f -name '*.md' | wc -l | tr -d ' ')
@@ -238,6 +238,8 @@ if [[ $fits != true ]]; then
 fi
 
 begin profile "Writing the installation profile"
+# An upgrade or a retry keeps the memory limit the profile already holds.
+if [[ -e $profile && -z $given_memory ]]; then memory_note="kept from the installation"; fi
 if (( $# == 1 )) && [[ ! -e $profile ]]; then
   if [[ ${source_args[1]:-} != example ]]; then
     answer_args+=(--database "${given_database:-sqlite}" --memory "$memory" --shelf "${given_shelf:-none}")

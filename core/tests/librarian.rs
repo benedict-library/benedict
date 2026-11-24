@@ -1,21 +1,23 @@
+mod common;
 use serde_json::Value;
 use std::{fs, process::Command};
 #[test]
 fn librarian_reindexes_scores_and_records_each_real_cycle() {
     let tmp = tempfile::tempdir().unwrap();
     let base = tmp.path();
-    let run = |args: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_benedict"))
+    let make = || {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_benedict"));
+        command
             .current_dir(base)
             .env("LIBRARY_CONFIG", base.join("library.json"))
             .env("LIBRARY_DB", base.join("evidence.sqlite"))
             .env_remove("LIBRARY_DB_URL")
-            .env_remove("LIBRARY_ROOM_SOCKET")
-            .args(args)
-            .output()
-            .unwrap()
+            .env("LIBRARY_ROOM_SOCKET", common::socket(base));
+        command
     };
+    let run = |args: &[&str]| make().args(args).output().unwrap();
     assert!(run(&["init", "--demo"]).status.success());
+    let _room = common::Room::start(make);
     fs::write(
         base.join("wiki/entities/current.md"),
         "# Today's dispatch\nXylo crate from aisle seven.",

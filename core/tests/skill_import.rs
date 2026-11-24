@@ -1,3 +1,4 @@
+mod common;
 use serde_json::Value;
 use std::{fs, process::Command};
 
@@ -16,17 +17,18 @@ fn a_new_agent_can_find_the_approved_skill_without_python() {
         bin.join("git"),
     )
     .unwrap();
-    let run = |args: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_benedict"))
+    let make = || {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_benedict"));
+        command
             .env_clear()
             .env("PATH", &bin)
             .env("HOME", root)
             .env("LIBRARY_CONFIG", root.join("library.json"))
-            .current_dir(root)
-            .args(args)
-            .output()
-            .unwrap()
+            .env("LIBRARY_ROOM_SOCKET", common::socket(root))
+            .current_dir(root);
+        command
     };
+    let run = |args: &[&str]| make().args(args).output().unwrap();
     let ok = |args: &[&str]| -> Value {
         let output = run(args);
         assert!(
@@ -37,6 +39,7 @@ fn a_new_agent_can_find_the_approved_skill_without_python() {
         serde_json::from_slice(&output.stdout).unwrap()
     };
     ok(&["init"]);
+    let _room = common::Room::start(make);
     let src = root.join("sample");
     fs::create_dir(&src).unwrap();
     let doc =

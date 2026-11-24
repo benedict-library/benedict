@@ -17,6 +17,7 @@ The last search returns both the sample policy and the answer you just filed. Gi
 and ask it to find the return window and its source. The handoff works when it can follow the filed answer back to
 the original policy.
 
-When a built Rust CLI is available (`BENEDICT_BIN`, `benedict` on PATH, or `core/target` in this checkout), search
-runs through it, so both clients rank results and explain an empty result the same way. The four rooms, filing
-through the librarian and the courier need the Docker installation in the [README](../README.md#install).
+When a built Rust CLI is available (`BENEDICT_BIN`, `benedict` on PATH, or `core/target` in this checkout) and its
+room service is running (`LIBRARY_ROOM_SOCKET`), search runs through the search room, so both clients rank results
+and explain an empty result the same way. Without the room service these commands search their own index. The four
+rooms, filing through the librarian and the courier need the Docker installation in the [README](../README.md#install).

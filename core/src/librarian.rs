@@ -83,6 +83,15 @@ fn cycle(config: &Path, key: &str, golden: Option<&str>, backup_dir: Option<&str
     let golden = named.as_deref().unwrap_or(&default_golden);
     let work = (|| -> Result<i32> {
         row["steps"]["index"] = local::index(config, key)?;
+        // The JSON index of earlier releases goes once the database gives the same results.
+        match crate::search_room::retire_json(config, key) {
+            Ok(Some(compared)) => row["steps"]["index"]["json_index"] = compared,
+            Ok(None) => {}
+            Err(e) => {
+                row["steps"]["index"]["json_index"] =
+                    json!({"removed":false,"index_mismatch":[e]})
+            }
+        }
         row["steps"]["transcripts"] = transcripts()?;
         if records::enabled() {
             row["steps"]["records"] = json!({"unfiled":records::unfiled(key)?});
