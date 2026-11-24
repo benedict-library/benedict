@@ -63,14 +63,81 @@ pub fn run(config: &Path, key: Option<&str>, args: &[String]) -> Result<Value, S
         }
         _ => return Err("expected --as filing or concept".into()),
     }
-    let save_args = [
-        format!("--refs={refs}"),
-        format!("--query={}", field("query")?),
-        question.to_owned(),
-        answer.to_owned(),
-    ];
-    let mut filed = catalog::run("save", config, Some(&library), &save_args)?
-        .ok_or("this registry requires its policy-aware filing adapter")?;
+    if !local::simple(config)?
+        || root.join(".wiki-pending").is_dir()
+        || std::env::var_os("LIBRARY_EMBED_URL").is_some()
+    {
+        return Err("this registry requires its policy-aware filing adapter".into());
+    }
+    // Filing is complete when the page exists and, for wiki sources, the golden
+    // line does too. A repeated call fills only what is missing.
+    let mut filed = catalog::file_page(config, Some(&library), question, answer, &refs)?;
+    let docs: Vec<&str> = source
+        .lines()
+        .map(str::trim)
+        .filter(|s| {
+            s.ends_with(".md")
+                && !s.contains("://")
+                && !s.starts_with('/')
+                && !s.split('/').any(|p| p == "..")
+                && root.join(s).is_file()
+        })
+        .collect();
+    if !docs.is_empty() {
+        filed["golden"] = golden(&library, question, &docs, &entry["id"].to_string())?;
+    }
+    filed["filed_at"] = json!(records::mark_filed(&library, &entry["id"].to_string())?);
     filed["source_record_id"] = entry["id"].clone();
     Ok(filed)
+}
+
+/// One golden line per question. Another wiki document for the same question
+/// extends that line instead of adding a second one.
+fn golden(library: &str, question: &str, docs: &[&str], id: &str) -> Result<Value, String> {
+    let dir = crate::rooms::data_dir().join("golden");
+    files::no_link(&dir)?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("{library}.jsonl"));
+    files::no_link(&path)?;
+    let mut rows: Vec<Value> = match std::fs::read_to_string(&path) {
+        Ok(text) => text
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str(l).map_err(|e| format!("golden file: {e}")))
+            .collect::<Result<_, _>>()?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => vec![],
+        Err(e) => return Err(e.to_string()),
+    };
+    let mut changed = false;
+    match rows.iter_mut().find(|r| r["q"] == question) {
+        Some(row) => {
+            let mut list: Vec<Value> = match &row["answer_doc"] {
+                Value::String(s) => vec![json!(s)],
+                Value::Array(a) => a.clone(),
+                _ => vec![],
+            };
+            for doc in docs {
+                if !list.iter().any(|d| d == doc) {
+                    list.push(json!(doc));
+                    changed = true;
+                }
+            }
+            row["answer_doc"] = json!(list);
+        }
+        None => {
+            rows.push(json!({"q":question,"answer_doc":docs,"src":format!("room record {id}")}));
+            changed = true;
+        }
+    }
+    if changed {
+        let mut text = String::new();
+        for row in &rows {
+            text.push_str(&row.to_string());
+            text.push('\n');
+        }
+        let tmp = path.with_extension("jsonl.tmp");
+        std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+    }
+    Ok(json!({"path":format!("golden/{library}.jsonl"),"changed":changed}))
 }

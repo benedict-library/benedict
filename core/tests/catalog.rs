@@ -37,7 +37,7 @@ fn standalone_handoff_in_new_processes_without_python() {
     assert_eq!(found["hits"][0]["path"], "entities/refund.md");
     let body = ok(home, &["read", "--question", raw, "entities/refund.md"]);
     assert!(body["text"].as_str().unwrap().contains("14 days"));
-    let filed = ok(
+    let saved = ok(
         home,
         &[
             "save",
@@ -49,6 +49,9 @@ fn standalone_handoff_in_new_processes_without_python() {
             "entities/refund.md",
         ],
     );
+    // `save` keeps the record only; the librarian files it.
+    assert!(saved.get("path").is_none());
+    let filed = ok(home, &["file", "--id", &saved["record_id"].to_string()]);
     let recalled = ok(home, &["recall", "--question", raw]);
     for (entry, room) in
         recalled["records"]
@@ -72,7 +75,7 @@ fn standalone_handoff_in_new_processes_without_python() {
         "Approved extension to 17 days.",
     )
     .unwrap();
-    ok(
+    let revised = ok(
         home,
         &[
             "save",
@@ -82,6 +85,7 @@ fn standalone_handoff_in_new_processes_without_python() {
             "revised.md",
         ],
     );
+    ok(home, &["file", "--id", &revised["record_id"].to_string()]);
     let updated = ok(home, &["read", path]);
     for evidence in [
         "## 변경 이력",
@@ -143,8 +147,9 @@ fn scoped_originals_are_searchable_readable_and_verifiable() {
         home,
         &["save", "Which markers?", "Violet", "--refs", reference],
     );
+    let filed = ok(home, &["file", "--id", &saved["record_id"].to_string()]);
     assert!(
-        ok(home, &["read", saved["path"].as_str().unwrap()])["text"]
+        ok(home, &["read", filed["path"].as_str().unwrap()])["text"]
             .as_str()
             .unwrap()
             .contains(reference)

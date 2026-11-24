@@ -95,13 +95,26 @@ fn separate_agents_share_four_live_rooms_and_reopen_a_task_after_server_replacem
             "--source",
             "검사표 A7",
         ]);
+        // Room memory holds the transcript event; the database row keeps its own ID.
+        let event = &rooms.get(&["room", "memory", "--room", name])["records"][0];
         assert_eq!(
-            rooms.get(&["room", "memory", "--room", name])["records"][0],
-            saved
+            (&event["question"], &event["source"]),
+            (&saved["question"], &saved["source"])
+        );
+        assert!(
+            event["turn"]["file"]
+                .as_str()
+                .unwrap()
+                .ends_with(&format!("/main-{name}.jsonl"))
         );
     }
     let meeting = rooms.get(&["room", "memory", "--room", "meeting"]);
-    assert_eq!(meeting["records"], serde_json::json!([entry, reply]));
+    let events = meeting["records"].as_array().unwrap();
+    assert_eq!(events.len(), 4);
+    assert_eq!(events[0]["question"], entry["question"]);
+    assert_eq!(events[1]["role"], "open");
+    assert_eq!(events[2]["answer"], reply["answer"]);
+    assert_eq!(events[3]["role"], "open");
     assert!(
         !rooms
             .call(&["room", "open", "--id", &id, "--library", "unrelated"])
