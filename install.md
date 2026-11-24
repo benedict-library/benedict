@@ -57,7 +57,12 @@ The installer starts only the room service. The librarian service rebuilds the i
 
 ### Wiki access for the container
 
-If UID 10001 cannot write the wiki, propose this change and run it only after the user agrees. It gives UID 10001 read and write access to the existing pages and to pages created later, and nobody else:
+If UID 10001 cannot write the wiki, check two things before proposing a change:
+
+- Who else is UID 10001 on this machine: `getent passwd 10001`. If an account is printed, that person would also be able to edit the wiki; tell the user and let them decide.
+- That `$WIKI` is the wiki folder itself: show the absolute path and its page count from step 2. Never apply the change to a home folder, `/`, or a folder that holds more than the wiki.
+
+Then propose this change and run it only after the user agrees. It gives UID 10001 read and write access to the existing pages and to pages created later, and nobody else:
 
 ```bash
 setfacl -R -m u:10001:rwX -m d:u:10001:rwX "$WIKI"
