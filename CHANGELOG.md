@@ -96,6 +96,8 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `bin/gate.py` creates each socket with mode 0660 instead of narrowing it after it is created, so a
+  client can no longer connect while the socket is still open to everyone.
 - `read shelf:<path>` no longer refuses an original that is not plain text. A PDF, office document
   or image on the shelf is now described by its size and SHA-256 with `"binary": true`, so an agent
   can open the file itself instead of being told the original is unreadable.
