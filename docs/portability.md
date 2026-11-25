@@ -18,6 +18,17 @@ the files instead. The first librarian run after an upgrade compares five questi
 and on the database, removes the file when they agree and otherwise keeps it and lists the questions under
 `index_mismatch`.
 
+Semantic search (SQLite installations): with `LIBRARY_EMBED_URL` set (an `http://` server answering
+`POST /v1/embeddings`, such as the `embedder` service of the `semantic` compose profile) and `LIBRARY_EMBED_MODEL`
+naming its model, the librarian embeds each changed document after indexing, in 1,000-character parts, at most
+2,000 parts a cycle, and stores the vectors in the database (`benedict_vectors`, `benedict_vector_identity`). A new
+model name embeds every document again. The search room loads the vectors with the index and fuses the word ranking
+with the vector ranking (best part per document, reciprocal rank fusion with k = 60 over the top 50 of each). Results
+carry `engine` (`lexical-bm25` or `hybrid-rrf`) and `semantic.status`: `not_configured` without a server,
+`partial` while documents still wait for vectors, and `failed` with the reason when the server does not answer; then
+the word results are still printed and the exit status is 1. A failed embedding step makes the librarian cycle a
+warning; it does not stop the cycle. PostgreSQL installations keep the Python vector mode below.
+
 ## Python compatibility and local file/index mode
 
 `bin/library.py` reads an explicit JSON registry (default `./library.json`) and selected Markdown root. It does not
