@@ -410,6 +410,10 @@ if [[ $progress != json ]]; then
   Log               $log
 To change a choice, install into a new project folder with --memory SIZE, --database postgres
 --database-secret-file FILE, --shelf DIR, --autostart off, --librarian off or --transcript-days N.
-Turn semantic search on or off in this project with bin/install-project --semantic on|off PROJECT.
+Turn semantic search on or off in this project with bin/install-project --semantic on|off PROJECT,
+or use an embedding server that already runs with --embed-url http://HOST:PORT (docs/embedding.md).
 SUMMARY
+  if [[ $semantic == on && -z $given_embed_url && $(uname -s) == Darwin ]] && jq -e '.services.embedder' "$profile" >/dev/null; then
+    say "Docker on macOS runs the embedder without the GPU; for thousands of pages a server on the host is much faster (docs/embedding.md)."
+  fi
 fi
