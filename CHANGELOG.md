@@ -29,6 +29,10 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A mobile number written with both the country code and the trunk 0 (`+82 010-1234-5678`) or followed by a space
+  and another number (`010-1234-5678 9시`) was not masked, because the extra digits were read as part of it. Trailing
+  space-separated groups are dropped only when the rest is a number that is masked. Found in real agent transcripts
+  (30 and 27 numbers left).
 - A mobile number with markdown bold right before or after it (`**010-1234-5678**`, common in model answers) was
   not masked, because the stars counted as part of the number. Stars stay part of a number only when they continue
   its digits, as in an already masked `010****5678`. Found in a real agent transcript.

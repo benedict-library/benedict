@@ -168,12 +168,15 @@ fn numbers(chars: &[char], hits: &mut Vec<Hit>) {
         let start = i;
         let mut j = if plus { i + 1 } else { i };
         let mut groups: Vec<String> = Vec::new();
+        let mut ends: Vec<usize> = Vec::new();
+        let mut spaced: Vec<bool> = Vec::new();
         loop {
             let gs = j;
             while j < n && (chars[j].is_ascii_digit() || (chars[j] == '*' && j > gs)) {
                 j += 1;
             }
             groups.push(chars[gs..j].iter().collect());
+            ends.push(j);
             let sep = if j + 2 < n && chars[j] == ' ' && chars[j + 1] == '-' && chars[j + 2] == ' '
             {
                 3
@@ -183,6 +186,7 @@ fn numbers(chars: &[char], hits: &mut Vec<Hit>) {
                 0
             };
             if sep > 0 && j + sep < n && chars[j + sep].is_ascii_digit() {
+                spaced.push(sep == 1 && chars[j] == ' ');
                 j += sep;
             } else {
                 break;
@@ -213,6 +217,26 @@ fn numbers(chars: &[char], hits: &mut Vec<Hit>) {
             {
                 groups = bare;
                 end = j - trail;
+            }
+        }
+        // A number followed by a space and another number (010-1234-5678 9시) is the number
+        // alone: trailing space-separated groups are dropped only when the rest then matches.
+        {
+            let ctx = before(chars, start, 20);
+            let matches = |g: &[String]| {
+                let lens: Vec<usize> = g.iter().map(|x| x.chars().count()).collect();
+                classify(plus, &lens, &g.concat(), lens.iter().sum(), &ctx).is_some()
+            };
+            let mut keep = groups.len();
+            if !matches(&groups) {
+                while keep > 1 && spaced[keep - 2] {
+                    keep -= 1;
+                    if matches(&groups[..keep]) {
+                        groups.truncate(keep);
+                        end = ends[keep - 1];
+                        break;
+                    }
+                }
             }
         }
         let next_bad = end < n && {
@@ -249,7 +273,24 @@ fn numbers(chars: &[char], hits: &mut Vec<Hit>) {
                 let head: String = d[..6].iter().collect();
                 format!("{head}-{}******", d[6])
             }
-            Some("[휴대폰]") => star_middle(span, if plus { 4 } else { 3 }, 4),
+            Some("[휴대폰]") => {
+                // +82 10-… keeps 8210, +82 010-… keeps 82010
+                let trunk = plus
+                    && digits
+                        .strip_prefix("82")
+                        .is_some_and(|r| r.starts_with('0'));
+                star_middle(
+                    span,
+                    if trunk {
+                        5
+                    } else if plus {
+                        4
+                    } else {
+                        3
+                    },
+                    4,
+                )
+            }
             Some("[개인사업자]") => star_middle(span, 3, 2),
             Some(l) => l.to_string(),
             None => continue,
@@ -289,7 +330,13 @@ fn star_middle(span: &[char], head: usize, tail: usize) -> String {
 fn classify(plus: bool, lens: &[usize], d: &str, total: usize, ctx: &str) -> Option<&'static str> {
     let mobile = |s: &str| s.len() >= 3 && s.starts_with("01") && "016789".contains(&s[2..3]);
     if plus {
-        let rest = format!("0{}", d.strip_prefix("82")?);
+        // +82 010-… (the trunk 0 kept after the country code) is written as often as +82 10-…
+        let after = d.strip_prefix("82")?;
+        let rest = if after.starts_with('0') {
+            after.to_string()
+        } else {
+            format!("0{after}")
+        };
         return if mobile(&rest) {
             Some("[휴대폰]")
         } else {
@@ -497,7 +544,12 @@ pub fn value(output: &mut serde_json::Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    const MASKED: [(&str, &str); 37] = [
+    const MASKED: [(&str, &str); 39] = [
+        ("Mobile +82 010-2468-0193 로", "Mobile +82 010-****-0193 로"),
+        (
+            "연락처 010-1234-5678 9시 통화",
+            "연락처 010-****-5678 9시 통화",
+        ),
         (
             "연락처는 **010-1234-5678**입니다",
             "연락처는 **010-****-5678**입니다",
