@@ -58,7 +58,7 @@ It prints the step, the reason and the log path (`PROJECT/.benedict/install.log`
 - **The bundled skill page was edited.** An upgrade replaces `entities/skill_benedict-library.md` when it is the page an earlier version wrote. If someone changed it, the installer stops. Ask the user before moving their version to another name (for example `entities/skill_benedict-library.local.md`), then run the installer again.
 - **Anything else.** Show the reason line and the last lines of the log. Do not change files or permissions without the user's agreement.
 
-To retry, run the installer again with the same options. Once step 3 has written `PROJECT/.benedict/profile.json`, `bin/install-project PROJECT` with no options also retries with the same choices. Semantic search can be turned on or off later with `bin/install-project --semantic on|off PROJECT`. To change another choice after that, choose a new project folder.
+To retry, run the installer again with the same options. Once step 3 has written `PROJECT/.benedict/profile.json`, `bin/install-project PROJECT` with no options also retries with the same choices. Semantic search can be turned on or off later with `bin/install-project --semantic on|off PROJECT`; a run with the image that last indexed the project keeps the index instead of indexing the wiki again. To change another choice after that, choose a new project folder.
 
 ## 5. Show the summary
 
@@ -75,7 +75,7 @@ git pull
 bin/install-project PROJECT
 ```
 
-The installer builds the new image, starts the room and the librarian again from it and indexes the wiki again. The profile, the wiki, the shelf and the data volume stay as they are, so the choices made at installation are kept. Do not pass `--start` or `--wiki`. If the librarian was turned off at installation, pass `--librarian off` again; without it the installer starts the librarian.
+The installer builds the new image, starts the room and the librarian again from it and indexes the wiki again when the image changed (it records the image in `PROJECT/.benedict/indexed-image`). The profile, the wiki, the shelf and the data volume stay as they are, so the choices made at installation are kept. Do not pass `--start` or `--wiki`. If the librarian was turned off at installation, pass `--librarian off` again; without it the installer starts the librarian.
 
 On a small server, build the image on another machine from the same commit (`docker build -t benedict-library .`), move it to the server with `docker save` and `docker load`, and run `bin/install-project --image benedict-library PROJECT` there; the server then does not compile.
 
