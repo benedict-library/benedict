@@ -19,8 +19,20 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that times out counts as cut and is sent once more. A virtual machine's network stalled a connection for over two
   seconds after a few hundred requests in a row while the server was healthy, which ended the step each time.
 
+### Fixed
+
+- A title on its own before `님` (부장님, 사장님, 차장님) was masked as a person's name, because the title starts with a
+  common surname; in one transcript this was 2,619 of 3,150 masked names. Titles are kept now.
+- A number or address right after an escape written out as text (`\n`, `\t`, `\r` in code, logs or JSON inside
+  a string) was not masked, because the escape letter counted as part of it.
+
 ### Added
 
+- `benedict mask [--jsonl] [FILE]` masks personal data in a text or JSON Lines file (or standard input) with the same
+  rules as search and read results, so agent transcripts and logs can be kept or analysed without it. JSON Lines are
+  masked string by string: keys, their order and every other value stay as written, and every line still parses. A
+  summary of the lines and the masked kinds goes to standard error. On a 67 MB transcript (11,698 lines) it took 1.1 s
+  and 24 MB of memory.
 - `benedict gate --listen HOST:PORT` lets agents in other containers search and read a library without
   Docker access: one JSON line per connection, `search` and `read` with `--top`, `--pages`, `--question` and
   `--library` only, masked and recorded as on the command line. The `gate` compose service is off unless
