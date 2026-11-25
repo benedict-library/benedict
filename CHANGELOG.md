@@ -5,6 +5,12 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The two Docker checks (installation handoff and Plaza on a fresh volume) run as their own jobs beside the test
+  matrix instead of after the Rust steps on Linux. Measured twice each: a run took 2m50s and 3m24s instead of 6m04s and
+  6m56s. Caching Rust builds as well did not shorten it further (3m12s, 4m23s) and is not added.
+
 ### Added
 
 - `docs/embedding.md` (and `docs/embedding.ko.md`) explains what semantic search adds and costs, the four choices
