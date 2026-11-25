@@ -9,6 +9,7 @@ mod index_store;
 mod install_journal;
 mod librarian;
 mod local;
+mod mask;
 mod promote;
 mod records;
 mod redact;
@@ -44,6 +45,7 @@ const HELP: &str = "Benedict — a library for agents and personas
   librarian    refresh the index and journal a maintenance cycle
   evaluate     check search results against known sources
   backup       snapshot or restore the wiki
+  mask         mask personal data in a text or JSON Lines file (or standard input)
   room         share tasks, replies and live room observations
   gate         let agents in other containers search and read (--listen HOST:PORT)
   method       read the library operating guide
@@ -58,6 +60,7 @@ fn usage(cmd: &str) -> Option<&'static str> {
         "add" => "add [--config PATH] --key KEY [--name NAME]",
         "index" => "index [--library KEY] [--config PATH]",
         "method" => "method [--lang en|ko]",
+        "mask" => "mask [--jsonl] [FILE]  (masked text on stdout, counts on stderr)",
         "search" => {
             "search [--config PATH] [--library KEY] [--top N] [--question ORIGINAL] [--web] QUERY"
         }
@@ -178,6 +181,10 @@ fn run() -> Result<i32, String> {
         }
         "backup" => {
             backup::run(&args)?;
+            return Ok(0);
+        }
+        "mask" => {
+            mask::run(&args)?;
             return Ok(0);
         }
         "setup" => {

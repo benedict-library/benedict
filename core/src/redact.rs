@@ -94,6 +94,12 @@ fn has_any(hay: &str, words: &[&str]) -> bool {
     words.iter().any(|w| hay.contains(w))
 }
 
+/// The letter of an escape such as \\n written out in text (code, logs, JSON inside a
+/// string) is a boundary, not part of the number or address after it.
+fn escape_letter(chars: &[char], i: usize) -> bool {
+    i > 0 && chars[i - 1] == '\\' && "ntr".contains(chars[i])
+}
+
 fn emails(chars: &[char], hits: &mut Vec<Hit>) {
     let local_ok = |c: char| c.is_ascii_alphanumeric() || "._%+-".contains(c);
     let dom_ok = |c: char| c.is_ascii_alphanumeric() || ".-".contains(c);
@@ -102,7 +108,7 @@ fn emails(chars: &[char], hits: &mut Vec<Hit>) {
             continue;
         }
         let mut s = at;
-        while s > 0 && local_ok(chars[s - 1]) {
+        while s > 0 && local_ok(chars[s - 1]) && !escape_letter(chars, s - 1) {
             s -= 1;
         }
         let mut e = at + 1;
@@ -145,7 +151,7 @@ fn numbers(chars: &[char], hits: &mut Vec<Hit>) {
         }
         let prev_bad = i > 0 && {
             let p = chars[i - 1];
-            p.is_ascii_alphanumeric()
+            (p.is_ascii_alphanumeric() && !escape_letter(chars, i - 1))
                 || p == '*'
                 || ((p == '.' || p == ',' || p == ':') && i > 1 && chars[i - 2].is_ascii_digit())
         };
@@ -362,7 +368,14 @@ fn names(chars: &[char], hits: &mut Vec<Hit>) {
         let titled = attached || (k > j && TITLES.iter().any(|t| after.starts_with(t)));
         let label_before = NAME_LABELS.iter().any(|l| before(chars, i, 6).contains(l));
         let org = ORG_ENDS.iter().any(|e| tok.ends_with(e));
-        if (2..=4).contains(&len) && looks_like_surname(&tok) && !org && (titled || label_before) {
+        // A title on its own (부장님, 차장님) is not a name even though it starts with a surname.
+        let title = TITLES.contains(&tok.as_str());
+        if (2..=4).contains(&len)
+            && looks_like_surname(&tok)
+            && !org
+            && !title
+            && (titled || label_before)
+        {
             hits.push(Hit {
                 start: i,
                 end: tok_end,
@@ -448,7 +461,9 @@ pub fn value(output: &mut serde_json::Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    const MASKED: [(&str, &str); 33] = [
+    const MASKED: [(&str, &str); 35] = [
+        ("줄바꿈\\n010-1234-5678", "줄바꿈\\n010-****-5678"),
+        ("메일\\nhong@example.com", "메일\\n[이메일]"),
         ("휴대폰010-1234-5678/메일", "휴대폰010-****-5678/메일"),
         ("연락처01012345678로 연락", "연락처010****5678로 연락"),
         ("주민등록번호:900101-1234568", "주민등록번호:900101-1******"),
@@ -499,7 +514,10 @@ mod tests {
         ("홍길동님 안녕하세요", "홍*동님 안녕하세요"),
     ];
 
-    const KEPT: [&str; 24] = [
+    const KEPT: [&str; 27] = [
+        "차장님께 보고드립니다",
+        "부장님 확인 부탁",
+        "사장님 말씀 이사 선임",
         "법인 사업자번호605-86-23194",
         "총 2026년11월24일",
         "법인 사업자번호 605-86-23194",
