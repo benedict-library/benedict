@@ -35,7 +35,14 @@ pub(crate) struct Index {
     title_words: Vec<Vec<String>>,
     summary_words: Vec<BTreeMap<String, u32>>,
     korean: bool,
+    /// Unit-length vectors of document parts, when the librarian has embedded them.
+    vectors: Vec<(u32, Vec<f32>)>,
 }
+
+/// Reciprocal rank fusion constant, as in the original RRF paper and common hybrid search.
+const RRF_K: f64 = 60.0;
+/// Each ranking contributes this many candidates before fusion.
+const CANDIDATES: usize = 50;
 
 /// One query word: its stem, and the documents that hold it with the summed count.
 struct Found<'a> {
@@ -51,6 +58,7 @@ struct Builder {
     sorted: bool,
     lengths: Vec<Option<u64>>,
     postings: BTreeMap<String, Vec<(u32, u32)>>,
+    vectors: Vec<(u32, Vec<f32>)>,
 }
 
 impl Builder {
@@ -93,6 +101,12 @@ impl Builder {
                     }
                 }
             }
+            IndexRow::Vector { path, vec } => {
+                // Vectors of a document the index no longer holds wait for the librarian's next cycle.
+                if let Some(&id) = self.ids.get(&path) {
+                    self.vectors.push((id, vec));
+                }
+            }
         }
         Ok(())
     }
@@ -117,13 +131,9 @@ impl Builder {
             summaries.push(summary);
             hashes.push(hash);
         }
-        Ok(Index::from_parts(
-            state,
-            paths,
-            [titles, summaries, hashes],
-            lengths,
-            self.postings,
-        ))
+        let mut index = Index::from_parts(state, paths, [titles, summaries, hashes], lengths, self.postings);
+        index.vectors = self.vectors;
+        Ok(index)
     }
 }
 
@@ -158,6 +168,7 @@ impl Index {
             title_words,
             summary_words,
             korean,
+            vectors: Vec::new(),
         }
     }
 
@@ -310,11 +321,55 @@ impl Index {
             .unwrap_or_default())
     }
 
-    fn search(&self, reg: &Registry, key: &str, words: &BTreeSet<String>, top: usize) -> Result<Value> {
+    /// BM25 alone, or BM25 and the vector ranking fused with RRF when the library has vectors.
+    /// No absolute similarity threshold: only the order of each ranking counts.
+    fn ranked(&self, query: &str, found: &[Found<'_>], top: usize) -> (Vec<(f64, u32)>, &'static str, Value) {
+        use crate::embed;
+        let Some(url) = embed::url() else {
+            return (self.rank(found, top), "lexical-bm25", json!({"status":"not_configured"}));
+        };
+        let covered: BTreeSet<u32> = self.vectors.iter().map(|(doc, _)| *doc).collect();
+        if covered.is_empty() {
+            return (self.rank(found, top), "lexical-bm25", json!({"status":"partial","documents":0}));
+        }
+        let status = if covered.len() == self.paths.len() { "ok" } else { "partial" };
+        let failed = |e: String| json!({"status":"failed","error":e,"documents":covered.len()});
+        let question = match embed::embed(&url, &[embed::query_text(query)], embed::QUERY_WAIT) {
+            Ok(mut v) => v.remove(0),
+            Err(e) => return (self.rank(found, top), "lexical-bm25", failed(e)),
+        };
+        if question.len() != self.vectors[0].1.len() {
+            return (self.rank(found, top), "lexical-bm25", failed("query and document vectors differ in length".into()));
+        }
+        // SIMPLIFY: a linear scan; a vector index waits until a library is too large for it.
+        let mut best: HashMap<u32, f32> = HashMap::new();
+        for (doc, v) in &self.vectors {
+            let s: f32 = v.iter().zip(&question).map(|(a, b)| a * b).sum();
+            let e = best.entry(*doc).or_insert(f32::MIN);
+            *e = e.max(s);
+        }
+        let mut by_vector: Vec<(f32, u32)> = best.into_iter().map(|(doc, s)| (s, doc)).collect();
+        by_vector.sort_by(|a, b| b.0.total_cmp(&a.0).then(self.paths[a.1 as usize].cmp(&self.paths[b.1 as usize])));
+        by_vector.truncate(CANDIDATES);
+        let mut fused: HashMap<u32, f64> = HashMap::new();
+        for (rank, (_, doc)) in self.rank(found, CANDIDATES.max(top)).iter().enumerate() {
+            *fused.entry(*doc).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
+        }
+        for (rank, (_, doc)) in by_vector.iter().enumerate() {
+            *fused.entry(*doc).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
+        }
+        let mut ranked: Vec<(f64, u32)> = fused.into_iter().map(|(doc, s)| (s, doc)).collect();
+        ranked.sort_by(|a, b| b.0.total_cmp(&a.0).then(self.paths[a.1 as usize].cmp(&self.paths[b.1 as usize])));
+        ranked.truncate(top);
+        (ranked, "hybrid-rrf", json!({"status":status,"documents":covered.len()}))
+    }
+
+    fn search(&self, reg: &Registry, key: &str, query: &str, words: &BTreeSet<String>, top: usize) -> Result<Value> {
         let found = self.found(words);
         let shelf = reg.shelf_root(key)?;
+        let (ranked, engine, semantic) = self.ranked(query, &found, top);
         let mut hits = Vec::new();
-        for (score, doc) in self.rank(&found, top) {
+        for (score, doc) in ranked {
             let doc = doc as usize;
             let text = self.original(reg, key, shelf.as_deref(), doc)?;
             hits.push(json!({"path":self.paths[doc],"title":self.titles[doc],
@@ -327,8 +382,8 @@ impl Index {
             .map(|doc| json!({"path":self.paths[doc],"title":self.titles[doc],"summary":self.summaries[doc]}))
             .collect();
         let empty = hits.is_empty();
-        let mut result = json!({"library":key,"engine":"lexical-bm25","indexed_at":self.state.indexed_at,
-            "catalog":catalog,"hits":hits});
+        let mut result = json!({"library":key,"engine":engine,"semantic":semantic,
+            "indexed_at":self.state.indexed_at,"catalog":catalog,"hits":hits});
         if empty {
             let korean_query = words.iter().any(|w| w.chars().any(hangul));
             result["hint"] = json!(if korean_query && !self.korean {
@@ -409,6 +464,11 @@ struct Slot {
     loading: Option<(String, JoinHandle<Result<Option<Index>>>)>,
 }
 
+/// A loaded index is current while neither the index nor the library's vectors changed.
+fn version(state: &IndexState) -> String {
+    format!("{}|{}", state.indexed_at, state.vectors_at)
+}
+
 fn start_load(key: &str) -> JoinHandle<Result<Option<Index>>> {
     let key = key.to_owned();
     std::thread::spawn(move || Index::load(&key))
@@ -431,8 +491,7 @@ impl SearchRoom {
         }
         for key in reg.rows.keys() {
             if let Ok(Some(state)) = index_store::state(key) {
-                self.slots.entry(key.clone()).or_default().loading =
-                    Some((state.indexed_at, start_load(key)));
+                self.slots.entry(key.clone()).or_default().loading = Some((version(&state), start_load(key)));
             }
         }
     }
@@ -453,13 +512,10 @@ impl SearchRoom {
             return Err(MISMATCH.into());
         }
         let slot = self.slots.entry(key.to_owned()).or_default();
-        let fresh = |slot: &Slot| {
-            slot.current
-                .as_ref()
-                .is_some_and(|index| index.state.indexed_at == state.indexed_at)
-        };
-        if !fresh(slot) && slot.loading.as_ref().is_none_or(|(at, _)| *at != state.indexed_at) {
-            slot.loading = Some((state.indexed_at.clone(), start_load(key)));
+        let wanted = version(&state);
+        let fresh = |slot: &Slot| slot.current.as_ref().is_some_and(|index| version(&index.state) == wanted);
+        if !fresh(slot) && slot.loading.as_ref().is_none_or(|(at, _)| *at != wanted) {
+            slot.loading = Some((wanted.clone(), start_load(key)));
         }
         // Take a finished load; wait a little for one in progress, then answer from what is loaded.
         let deadline = Instant::now() + LOAD_WAIT;
@@ -489,7 +545,7 @@ impl SearchRoom {
         if !matching(&index.state) {
             return Err(MISMATCH.into());
         }
-        index.search(&reg, key, &words, top)
+        index.search(&reg, key, query, &words, top)
     }
 }
 
@@ -780,6 +836,7 @@ fn old_index(file: &Path) -> Result<Index> {
         shelf_root: shelf.unwrap_or_default(),
         indexed_at: indexed_at.unwrap_or_default(),
         documents: paths.len() as u64,
+        vectors_at: String::new(),
     };
     Ok(Index::from_parts(
         state,

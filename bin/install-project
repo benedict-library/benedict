@@ -7,7 +7,7 @@ source_args=()
 answer_args=()
 progress=
 librarian=on
-given_database= given_memory= given_shelf= given_autostart= given_transcripts=
+given_database= given_memory= given_shelf= given_autostart= given_transcripts= given_semantic=
 while [[ ${1:-} == --* ]]; do
   [[ -n ${2:-} ]] || { echo "$1 needs a value" >&2; exit 2; }
   case $1 in
@@ -31,6 +31,9 @@ while [[ ${1:-} == --* ]]; do
     --librarian)
       [[ $2 == on || $2 == off ]] || { echo 'expected --librarian on or off' >&2; exit 2; }
       librarian=$2 ;;
+    --semantic)
+      [[ $2 == on || $2 == off ]] || { echo 'expected --semantic on or off' >&2; exit 2; }
+      given_semantic=$2 ;;
     --transcript-days)
       [[ $2 == keep || $2 =~ ^[1-9][0-9]*$ ]] || { echo 'expected --transcript-days keep or a number of days' >&2; exit 2; }
       given_transcripts=$2 ;;
@@ -49,7 +52,7 @@ while [[ ${1:-} == --* ]]; do
   shift 2
 done
 if (( $# < 1 || $# > 2 )); then
-  echo 'usage: bin/install-project [--start example|empty | --wiki DIR] [--database sqlite|postgres] [--database-secret-file FILE] [--memory SIZE] [--shelf DIR|none] [--autostart on|off] [--librarian on|off] [--transcript-days N|keep] [--progress json] EXISTING_WORKSPACE [CONFIRMED_COMPOSE_PROFILE.json]' >&2
+  echo 'usage: bin/install-project [--start example|empty | --wiki DIR] [--database sqlite|postgres] [--database-secret-file FILE] [--memory SIZE] [--shelf DIR|none] [--autostart on|off] [--librarian on|off] [--semantic on|off] [--transcript-days N|keep] [--progress json] EXISTING_WORKSPACE [CONFIRMED_COMPOSE_PROFILE.json]' >&2
   exit 2
 fi
 repo=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
@@ -236,6 +239,23 @@ fi
 if [[ $fits != true ]]; then
   say "  Docker can give this library at most $memory; a wiki of $pages pages may need more. Raise Docker's memory to be safe."
 fi
+# Semantic search runs a 2 GiB embedding server beside the library. Unless the user chose, it is on
+# when both fit in two thirds of Docker's memory, as the memory limit itself is capped.
+mib() { case $1 in *[gG]) echo $(( ${1%[gG]} * 1024 )) ;; *[mM]) echo "${1%[mM]}" ;; *) echo $(( $1 / 1048576 )) ;; esac; }
+semantic=$given_semantic semantic_note=chosen existed=false
+if [[ -e $profile ]]; then existed=true; fi
+if [[ -n $given_semantic && $existed == true && $profile != "$state/profile.json" ]]; then
+  echo '--semantic changes only the profile the installer keeps in PROJECT/.benedict' >&2; exit 2
+fi
+if [[ -z $semantic && $existed == false ]]; then
+  if [[ $given_database == postgres ]]; then
+    semantic=off semantic_note='semantic search uses the SQLite database'
+  elif (( docker_memory > 0 && $(mib "$memory") + 2048 <= docker_memory / 1048576 * 2 / 3 )); then
+    semantic=on semantic_note='the 2 GiB embedding server fits in Docker memory'
+  else
+    semantic=off semantic_note="Docker memory cannot also hold the 2 GiB embedding server"
+  fi
+fi
 
 begin profile "Writing the installation profile"
 # An upgrade or a retry keeps the memory limit the profile already holds.
@@ -246,14 +266,48 @@ if (( $# == 1 )) && [[ ! -e $profile ]]; then
   elif [[ -n $given_memory ]]; then
     answer_args+=(--memory "$memory")
   fi
-  answer_args+=(--autostart "${given_autostart:-on}" --transcript-days "${given_transcripts:-keep}")
+  answer_args+=(--autostart "${given_autostart:-on}" --transcript-days "${given_transcripts:-keep}" --semantic "$semantic")
   quiet docker run --rm --user "$(id -u):$(id -g)" -v "$stage:/settings" "$image" setup --project "$project" "${source_args[@]}" "${answer_args[@]}" --output /settings/profile.json
   mv -- "$stage/profile.json" "$profile"
+fi
+# The same address and model name as core/src/setup.rs writes into new profiles.
+embed_url=http://embedder:8080 embed_model=embeddinggemma-2-BF16@6ea3e3a
+if [[ -n $given_semantic && $existed == true ]]; then
+  if [[ $given_semantic == on ]]; then
+    if jq -e '.services.library.environment | has("LIBRARY_DB_URL") or has("LIBRARY_DB_URL_FILE")' "$profile" >/dev/null; then
+      echo '--semantic on needs the SQLite database' >&2; exit 2
+    fi
+    jq --arg url "$embed_url" --arg model "$embed_model" \
+      '(.services.library, .services.room, .services.librarian) |= (.environment.LIBRARY_EMBED_URL = $url
+        | .environment.LIBRARY_EMBED_MODEL = $model) | .services.embedder = {restart: (.services.room.restart // "unless-stopped")}' \
+      "$profile" >"$profile.next"
+  else
+    jq 'del(.services[].environment.LIBRARY_EMBED_URL, .services[].environment.LIBRARY_EMBED_MODEL, .services.embedder)' \
+      "$profile" >"$profile.next"
+  fi
+  mv -- "$profile.next" "$profile"
+fi
+if [[ -z $semantic ]]; then
+  semantic=off semantic_note='kept from the installation'
+  if jq -e '.services.room.environment.LIBRARY_EMBED_URL' "$profile" >/dev/null; then semantic=on; fi
 fi
 export LIBRARY_IMAGE="$image"
 compose=(docker compose -p "$project" -f "$base" -f "$profile")
 
 begin room "Starting the room service"
+if [[ $semantic == on ]]; then
+  # The model file is fetched once at a pinned revision and checked before the server uses it.
+  model_url=https://huggingface.co/ggml-org/embeddinggemma-2-GGUF/resolve/6ea3e3a309d12a4779cfda98b8c19800d2d5da71/embeddinggemma-2-BF16.gguf
+  model_sha=68bae29d62fb8c7d23e98d21fd4662753ddd636e6b62b8a70dfe059a9844f216
+  quiet "${compose[@]}" --profile semantic run --rm --no-deps -T --entrypoint sh embedder -c '
+    f=/models/embeddinggemma-2-BF16.gguf
+    if [ -s "$f" ] && echo "$2  $f" | sha256sum -c --quiet -; then exit 0; fi
+    curl -sSfL --retry 3 -o "$f.part" "$1" && echo "$2  $f.part" | sha256sum -c --quiet - && mv "$f.part" "$f"
+  ' fetch "$model_url" "$model_sha"
+  quiet "${compose[@]}" --profile semantic up -d --no-build --wait embedder
+elif [[ $given_semantic == off ]]; then
+  quiet "${compose[@]}" --profile semantic rm --stop --force embedder
+fi
 quiet "${compose[@]}" up -d --no-build --wait room
 
 begin index "Indexing the wiki"
@@ -297,7 +351,8 @@ transcripts=$(jq -r '.services.librarian.environment.LIBRARY_TRANSCRIPT_DAYS // 
 emit "$(jq -cn --argjson steps "$steps" --argjson elapsed "$(( $(date +%s) - started ))" \
   --arg workspace "$workspace" --arg project "$project" --argjson documents "${documents:-null}" \
   --argjson memory "$limit" --arg database "$database" --arg restart "$restart" --arg librarian "$librarian" \
-  '{event:"done",steps:$steps,elapsed:$elapsed,workspace:$workspace,project:$project,documents:$documents,memory:$memory,database:$database,restart:$restart,librarian:$librarian}')"
+  --arg semantic "$semantic" \
+  '{event:"done",steps:$steps,elapsed:$elapsed,workspace:$workspace,project:$project,documents:$documents,memory:$memory,database:$database,restart:$restart,librarian:$librarian,semantic:$semantic}')"
 printf 'Benedict is ready in %s\n' "$workspace"
 if [[ $progress != json ]]; then
   if [[ -n $wiki ]]; then from="your wiki $wiki ($pages pages)"; else from=${source_args[1]:-the existing profile}; fi
@@ -310,10 +365,12 @@ if [[ $progress != json ]]; then
   Memory limit      $(( limit / 1048576 ))m per container ($memory_note)
   Database          $database
   Librarian         $keeper
+  Semantic search   $semantic ($semantic_note)
   After a reboot    $reboot
   Conversations     $kept
   Log               $log
 To change a choice, install into a new project folder with --memory SIZE, --database postgres
 --database-secret-file FILE, --shelf DIR, --autostart off, --librarian off or --transcript-days N.
+Turn semantic search on or off in this project with bin/install-project --semantic on|off PROJECT.
 SUMMARY
 fi
