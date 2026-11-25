@@ -5,6 +5,13 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `docs/embedding.md` (and `docs/embedding.ko.md`) explains what semantic search adds and costs, the four choices
+  (off, the embedder container, a server on the host, a server elsewhere), measured speed of the container against a
+  host server on a Mac, how containers reach the host for each Docker, and `launchd` and `systemd` examples. The
+  installer summary names `--embed-url`, and on macOS with the embedder container it points to that page.
+
 ### Changed
 
 - An embedding request from the librarian no longer has a fixed 60-second limit, which cut every batch on a slow
