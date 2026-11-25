@@ -26,7 +26,7 @@ model name embeds every document again. A request has no fixed time limit: it ma
 per part times its parts (eight times wider while a library has fewer than five records; the first prediction is
 0.5 s per part). Each request's time per part is recorded in `benedict_embed_pace` (the last 50); a request cut by
 its wait is recorded at that wait, as a lower bound, and sent once more with the longer wait, and the step reports
-`cut`. A slow machine is therefore waited on as long as it needs, and a server that never answers is left to the next
+`cut`; connecting may take the same wait, and a connection that times out counts as cut. A slow machine is therefore waited on as long as it needs, and a server that never answers is left to the next
 cycle. The search room loads the vectors with the index and fuses the word ranking
 with the vector ranking (best part per document, reciprocal rank fusion with k = 60 over the top 50 of each). Results
 carry `engine` (`lexical-bm25` or `hybrid-rrf`) and `semantic.status`: `not_configured` without a server,
