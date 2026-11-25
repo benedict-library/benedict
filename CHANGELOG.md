@@ -35,8 +35,9 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and 24 MB of memory.
 - `benedict gate --listen HOST:PORT` lets agents in other containers search and read a library without
   Docker access: one JSON line per connection, `search` and `read` with `--top`, `--pages`, `--question` and
-  `--library` only, masked and recorded as on the command line. The `gate` compose service is off unless
-  started with `--profile gate`; `bin/library-client` is a standard-library client. See `docs/gate.md`.
+  `--library` only, masked and recorded as on the command line. The room service opens it inside the library's
+  own container when `LIBRARY_GATE` names an address, so a library stays one container; a gate that cannot open
+  tries again while the room keeps serving. `bin/library-client` is a standard-library client. See `docs/gate.md`.
 - `docs/embedding.md` (and `docs/embedding.ko.md`) explains what semantic search adds and costs, the four choices
   (off, the embedder container, a server on the host, a server elsewhere), measured speed of the container against a
   host server on a Mac, how containers reach the host for each Docker, and `launchd` and `systemd` examples. The
