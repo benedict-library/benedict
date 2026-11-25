@@ -12,6 +12,9 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   now predicted from the library's own records (`benedict_embed_pace`): twice the slowest recorded time per part,
   wider while there are few records. A cut request is recorded as a lower bound and sent once more with the longer
   wait; the vector step reports `cut`.
+- A batch embedding request may also take its predicted wait to connect, instead of two seconds, and a connection
+  that times out counts as cut and is sent once more. A virtual machine's network stalled a connection for over two
+  seconds after a few hundred requests in a row while the server was healthy, which ended the step each time.
 
 ### Added
 
