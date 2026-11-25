@@ -3,7 +3,7 @@ x-runtime: &runtime
   image: ${LIBRARY_IMAGE:-benedict-local}
   build: .
   user: "10001:10001"
-  mem_limit: ${LIBRARY_MEMORY_LIMIT:-512m}
+  mem_limit: ${LIBRARY_MEMORY_LIMIT:-1g}
 
 x-library-mounts: &library-mounts
   - library_data:/data
@@ -36,8 +36,6 @@ services:
     <<: *runtime
     environment:
       LIBRARY_ROOM_SOCKET: /data/rooms.sock
-      # Installed libraries clear this and use /data/golden/<library>.jsonl when it exists.
-      LIBRARY_GOLDEN: /app/examples/golden.jsonl
     depends_on:
       room:
         condition: service_healthy
@@ -56,5 +54,17 @@ services:
     restart: ${LIBRARY_RESTART:-unless-stopped}
     command: [gate, --listen, "0.0.0.0:8740"]
     volumes: *library-mounts
+  # Semantic search: a local embedding server on two CPU cores, no GPU. The installer fetches the
+  # model file into library_models and checks its SHA-256 (see THIRD_PARTY.md). No port is published.
+  embedder:
+    profiles: [semantic]
+    image: ghcr.io/ggml-org/llama.cpp:server-b12464@sha256:5b43086e3ba7ea5794d72904654f6cd41224a9b1c6ac0398f4940ee380d30f23
+    command: [-m, /models/embeddinggemma-2-BF16.gguf, --embedding, --pooling, mean, -t, "2", -c, "2048", -b, "2048", -ub, "2048", --host, 0.0.0.0, --port, "8080"]
+    # Measured at about 220 MiB while embedding; 2 GiB leaves room for longer batches.
+    mem_limit: 2g
+    restart: ${LIBRARY_RESTART:-unless-stopped}
+    volumes:
+      - library_models:/models
 volumes:
   library_data:
+  library_models:

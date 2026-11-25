@@ -3,7 +3,6 @@
 use rustix::fs::{AtFlags, Dir, FileType, Mode, OFlags, open, openat, statat};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
     fs::File,
     io::Read,
     path::{Component, Path},
@@ -142,11 +141,12 @@ pub fn open_original(root: &Path, name: &str) -> Result<Original> {
     }
 }
 
-pub fn index(root: &Path, docs: &mut BTreeMap<String, String>) -> Result<()> {
-    walk(&directory(root)?, "", docs)
+/// Hand each text original to `visit` as ("shelf:<path>", text), one at a time.
+pub fn each(root: &Path, visit: &mut dyn FnMut(String, String) -> Result<()>) -> Result<()> {
+    walk(&directory(root)?, "", visit)
 }
 
-fn walk(dir: &File, prefix: &str, docs: &mut BTreeMap<String, String>) -> Result<()> {
+fn walk(dir: &File, prefix: &str, visit: &mut dyn FnMut(String, String) -> Result<()>) -> Result<()> {
     for entry in Dir::read_from(dir).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let Ok(name) = entry.file_name().to_str() else {
@@ -170,7 +170,7 @@ fn walk(dir: &File, prefix: &str, docs: &mut BTreeMap<String, String>) -> Result
                 let sub = File::from(
                     openat(dir, name, DIRECTORY, Mode::empty()).map_err(|e| e.to_string())?,
                 );
-                walk(&sub, &format!("{rel}/"), docs)?;
+                walk(&sub, &format!("{rel}/"), visit)?;
             }
             FileType::RegularFile
                 if matches!(
@@ -180,9 +180,7 @@ fn walk(dir: &File, prefix: &str, docs: &mut BTreeMap<String, String>) -> Result
             {
                 let mut text = String::new();
                 match original(dir, name.as_ref())?.read_to_string(&mut text) {
-                    Ok(_) if !text.contains('\0') => {
-                        docs.insert(format!("shelf:{rel}"), text);
-                    }
+                    Ok(_) if !text.contains('\0') => visit(format!("shelf:{rel}"), text)?,
                     Ok(_) => (),
                     Err(e) if e.kind() == std::io::ErrorKind::InvalidData => (),
                     Err(e) => return Err(e.to_string()),

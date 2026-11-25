@@ -1,21 +1,23 @@
+mod common;
 use serde_json::{Value, json};
 use std::{fs, process::Command};
 #[test]
 fn evaluate_offline_scores_readable_sources_and_writes_no_room_evidence() {
     let temp = tempfile::tempdir().unwrap();
     let base = temp.path();
-    let cmd = |args: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_benedict"))
+    let make = || {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_benedict"));
+        command
             .current_dir(base)
             .env("LIBRARY_CONFIG", base.join("library.json"))
             .env_remove("LIBRARY_DB_URL")
-            .env_remove("LIBRARY_ROOM_SOCKET")
-            .env("LIBRARY_DB", base.join("evidence.sqlite"))
-            .args(args)
-            .output()
-            .unwrap()
+            .env("LIBRARY_ROOM_SOCKET", common::socket(base))
+            .env("LIBRARY_DB", base.join("evidence.sqlite"));
+        command
     };
+    let cmd = |args: &[&str]| make().args(args).output().unwrap();
     assert!(cmd(&["init", "--demo"]).status.success());
+    let _room = common::Room::start(make);
     let q = "refund";
     fs::write(
         base.join("golden"),
@@ -64,5 +66,10 @@ fn evaluate_offline_scores_readable_sources_and_writes_no_room_evidence() {
             .code(),
         Some(2)
     );
-    assert!(!base.join("evidence.sqlite").exists());
+    // The database holds the index; evaluating writes no room record.
+    let records: i64 = rusqlite::Connection::open(base.join("evidence.sqlite"))
+        .unwrap()
+        .query_row("SELECT count(*) FROM benedict_room_records", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(records, 0);
 }

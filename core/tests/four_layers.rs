@@ -412,7 +412,7 @@ fn an_event_that_cannot_reach_the_transcript_is_refused() {
 
 #[test]
 fn librarian_skips_or_flags_the_golden_file_without_stopping() {
-    let library = Library::new();
+    let mut library = Library::new();
     let (rows, code) = library.librarian(&mut library.base());
     assert_eq!((rows.len(), code), (2, Some(1)));
     assert_eq!(rows[0]["steps"]["golden"]["status"], "not_configured");
@@ -432,7 +432,9 @@ fn librarian_skips_or_flags_the_golden_file_without_stopping() {
         "{\"q\":\"refund\",\"answer_doc\":\"entities/refund.md\"}\n",
     )
     .unwrap();
-    let (rows, code) = library.librarian(&mut library.base());
+    // Scoring searches, and search goes through the room.
+    library.start();
+    let (rows, code) = library.librarian(&mut library.with_room());
     assert_eq!((rows.len(), code), (2, Some(0)));
     assert_eq!(rows[0]["steps"]["golden"]["summary"]["hit"], 1);
 }

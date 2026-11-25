@@ -83,6 +83,18 @@ fn cycle(config: &Path, key: &str, golden: Option<&str>, backup_dir: Option<&str
     let golden = named.as_deref().unwrap_or(&default_golden);
     let work = (|| -> Result<i32> {
         row["steps"]["index"] = local::index(config, key)?;
+        // The JSON index of earlier releases goes once the database gives the same results.
+        match crate::search_room::retire_json(config, key) {
+            Ok(Some(compared)) => row["steps"]["index"]["json_index"] = compared,
+            Ok(None) => {}
+            Err(e) => {
+                row["steps"]["index"]["json_index"] =
+                    json!({"removed":false,"index_mismatch":[e]})
+            }
+        }
+        // Vectors follow the index; a server that cannot be reached makes the cycle a warning.
+        row["steps"]["vectors"] = crate::vectors::refresh(config, key);
+        let vectors_failed = row["steps"]["vectors"]["status"] == "failed";
         row["steps"]["transcripts"] = transcripts()?;
         if records::enabled() {
             row["steps"]["records"] = json!({"unfiled":records::unfiled(key)?});
@@ -123,7 +135,7 @@ fn cycle(config: &Path, key: &str, golden: Option<&str>, backup_dir: Option<&str
                 &Path::new(dir).join(format!("{key}-{name}.tar")),
             )?;
         }
-        Ok(code)
+        Ok(if vectors_failed { code.max(1) } else { code })
     })();
     let code = match work {
         Ok(0) => {

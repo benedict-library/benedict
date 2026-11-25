@@ -9,6 +9,12 @@ on:
 permissions:
   contents: read
 
+# macOS runners are scarce. A new push to a pull request cancels its older run,
+# so a superseded run does not hold a macOS runner. Runs on main all finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     # Gitea also reads this folder; its runners have no macOS or Windows.
@@ -16,7 +22,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # macOS arm64 runners repeatedly went unassigned for capacity; the Intel pool runs the
+        # same macOS checks (paths, sockets, shells) until the image retires in fall 2027.
+        os: [ubuntu-latest, macos-15-intel, windows-latest]
         python: ["3.12"]
         include:
           - os: ubuntu-latest
@@ -64,11 +72,24 @@ jobs:
           cargo build --locked --manifest-path core/Cargo.toml
           cargo build --locked --manifest-path courier/Cargo.toml
           bash courier/tests/handoff.sh "$PWD/core/target/debug/benedict" "$PWD/courier/target/debug/courier"
+  docker:
+    # The two Docker checks run beside the matrix instead of after the Rust steps.
+    if: github.server_url == 'https://github.com'
+    strategy:
+      fail-fast: false
+      matrix:
+        check: [handoff, plaza]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Test Docker installation and handoff
-        if: runner.os == 'Linux' && matrix.python == '3.12'
+        if: matrix.check == 'handoff'
         run: bash tests/docker-handoff.sh
       - name: Test Plaza on a fresh Docker volume
-        if: runner.os == 'Linux' && matrix.python == '3.12'
+        if: matrix.check == 'plaza'
         run: |
           docker build -t benedict-plaza-ci plaza
           sh plaza/tests/fresh-volume.sh benedict-plaza-ci
