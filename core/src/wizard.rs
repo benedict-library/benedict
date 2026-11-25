@@ -54,8 +54,8 @@ pub fn prompt(step: &str, wiki_found: bool) -> Result<Value, String> {
             vec![
                 choice(
                     "folder",
-                    "내 원본 폴더 연결하기",
-                    "위키가 근거로 삼는 원본 폴더를 읽기 전용으로 연결합니다.",
+                    "내 원본 연결하기",
+                    "위키가 근거로 삼는 원본을 읽기 전용으로 연결합니다. 이 컴퓨터의 폴더나 SMB·NFS 같은 네트워크 저장소(도커 볼륨)를 고릅니다.",
                 ),
                 choice(
                     "none",

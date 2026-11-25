@@ -24,6 +24,8 @@ Use `--wiki-found` only when a candidate wiki has actually been found in the app
 
 Show the recommendation first with its reason. Count **기타 (직접 입력)** as one of at most three choices. When the host adds a built-in free-text choice, use it for `other` and omit the duplicate. If buttons are unavailable, show the same numbered choices and accept a number or the user’s words. Keep the displayed wording and ordering from the question output so the stored prompt matches the user’s choice. Resolve free text before applying it. Never silently map an unrecognized answer to the recommendation.
 
+For the shelf, find where the originals live before asking (see install.md, step 2). The folder choice covers a host folder (`--shelf DIR`) and network storage reached through a Docker volume the user created (`--shelf-volume NAME`, optionally `--shelf-subpath DIR` for one folder inside it). The profile mounts that volume read-only as an external volume, so removing the installation never removes it.
+
 Use one installation profile as the authority for the selected project, database type, storage mounts and memory limit. Suggest a project name from the selected workspace and show it for confirmation together with the resolved paths. The memory limit applies to each container; see [Memory](#memory). Where PostgreSQL needs credentials, request only a reference to an existing protected secret file; keep the connection string out of chat, the interview record, and wiki pages.
 
 ### Record each answer as it happens
