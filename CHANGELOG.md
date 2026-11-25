@@ -7,6 +7,14 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Semantic search for SQLite installations. The librarian embeds changed documents through a local embedding
+  server (`LIBRARY_EMBED_URL`, `LIBRARY_EMBED_MODEL`) and stores the vectors in the database; the search room fuses
+  word and vector rankings with reciprocal rank fusion. Results carry `engine` and `semantic.status`; a server
+  that does not answer leaves the word results and exit status 1. Golden-set evaluation records the engine that
+  answered. The `semantic` compose profile adds an `embedder` service (llama.cpp server, pinned by digest) and the
+  `library_models` volume. `install-project` turns it on when the library and the 2 GiB embedding server fit in two
+  thirds of Docker's memory, downloads EmbeddingGemma 2 at a pinned revision and checks its SHA-256, and shows the
+  choice in its summary; `--semantic on|off` sets it at installation or later.
 - `read` and `search` mask personal data before a result is recorded or printed, on the native path and
   through the compatibility adapter. Korean resident and foreign registration numbers keep the birth date
   and one digit (`900101-1******`), mobile numbers keep the first and last groups (`010-****-5678`),

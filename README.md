@@ -51,7 +51,7 @@ Keep this folder after installing: your project opens its library with the setti
 bin/install-project --start example ~/projects/notes
 ```
 
-Replace `~/projects/notes` with your project folder (create it first if it does not exist). The example brings its own example shelf. To start from your own wiki, use `--wiki WIKI_FOLDER` instead of `--start example`. The installer sets the memory limit from the wiki size, uses SQLite without a shelf, starts the librarian and brings the library back after a host restart. Its summary shows each choice and the option that changes it (`--memory`, `--database`, `--shelf`, `--autostart`, `--librarian`). It asks a question only if the library cannot write your wiki.
+Replace `~/projects/notes` with your project folder (create it first if it does not exist). The example brings its own example shelf. To start from your own wiki, use `--wiki WIKI_FOLDER` instead of `--start example`. The installer sets the memory limit from the wiki size, uses SQLite without a shelf, starts the librarian and brings the library back after a host restart. When Docker has memory for it, the installer also starts a local embedding server, so search finds pages that use other words for the same thing; nothing leaves the machine. Its summary shows each choice and the option that changes it (`--memory`, `--database`, `--shelf`, `--autostart`, `--librarian`, `--semantic`). It asks a question only if the library cannot write your wiki.
 
 **3. Check the connection.**
 
