@@ -10,16 +10,6 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The two Docker checks (installation handoff and Plaza on a fresh volume) run as their own jobs beside the test
   matrix instead of after the Rust steps on Linux. Measured twice each: a run took 2m50s and 3m24s instead of 6m04s and
   6m56s. Caching Rust builds as well did not shorten it further (3m12s, 4m23s) and is not added.
-
-### Added
-
-- `docs/embedding.md` (and `docs/embedding.ko.md`) explains what semantic search adds and costs, the four choices
-  (off, the embedder container, a server on the host, a server elsewhere), measured speed of the container against a
-  host server on a Mac, how containers reach the host for each Docker, and `launchd` and `systemd` examples. The
-  installer summary names `--embed-url`, and on macOS with the embedder container it points to that page.
-
-### Changed
-
 - An embedding request from the librarian no longer has a fixed 60-second limit, which cut every batch on a slow
   machine (16 parts took over 60 s on a shared four-core virtual machine) so documents never got vectors. The wait is
   now predicted from the library's own records (`benedict_embed_pace`): twice the slowest recorded time per part,
@@ -31,6 +21,14 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `benedict gate --listen HOST:PORT` lets agents in other containers search and read a library without
+  Docker access: one JSON line per connection, `search` and `read` with `--top`, `--pages`, `--question` and
+  `--library` only, masked and recorded as on the command line. The `gate` compose service is off unless
+  started with `--profile gate`; `bin/library-client` is a standard-library client. See `docs/gate.md`.
+- `docs/embedding.md` (and `docs/embedding.ko.md`) explains what semantic search adds and costs, the four choices
+  (off, the embedder container, a server on the host, a server elsewhere), measured speed of the container against a
+  host server on a Mac, how containers reach the host for each Docker, and `launchd` and `systemd` examples. The
+  installer summary names `--embed-url`, and on macOS with the embedder container it points to that page.
 - `install-project` records the image that indexed a project in `.benedict/indexed-image`. A later run with the
   same image (for example `--semantic on|off` or `--embed-url`) keeps the index instead of indexing the whole wiki
   again; a new image indexes again as before.
