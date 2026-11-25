@@ -13,12 +13,14 @@ use std::{
 type Result<T> = std::result::Result<T, String>;
 
 /// One version of a library's index. `shelf_root` is empty without a shelf.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct IndexState {
     pub root: String,
     pub shelf_root: String,
     pub indexed_at: String,
     pub documents: u64,
+    /// When the library's vectors last changed; empty without vectors.
+    pub vectors_at: String,
 }
 
 /// A document indexed again: its catalog row, length and word counts.
@@ -52,10 +54,23 @@ pub(crate) enum IndexRow {
         word: String,
         freq: u64,
     },
+    /// One part of a document as a unit-length vector.
+    Vector {
+        path: String,
+        vec: Vec<f32>,
+    },
 }
 
+/// Vectors live in SQLite only: semantic search is part of the simple setup.
+pub(crate) const VECTOR_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS benedict_vectors (project TEXT NOT NULL,
+        library TEXT NOT NULL, path TEXT NOT NULL, part INTEGER NOT NULL, hash TEXT NOT NULL,
+        vec BLOB NOT NULL, PRIMARY KEY (project, library, path, part)) WITHOUT ROWID;
+    CREATE TABLE IF NOT EXISTS benedict_vector_identity (project TEXT NOT NULL, library TEXT NOT NULL,
+        model TEXT NOT NULL, dim INTEGER NOT NULL, updated_at TEXT NOT NULL,
+        PRIMARY KEY (project, library)) WITHOUT ROWID;";
+
 /// Index writers wait this long for the room's reads to finish.
-const WRITE_WAIT: Duration = Duration::from_secs(120);
+pub(crate) const WRITE_WAIT: Duration = Duration::from_secs(120);
 const TABLES: [&str; 3] = ["benedict_terms", "benedict_lengths", "benedict_catalog"];
 const SCOPE: &str = "project=:'project' AND library=:'library'";
 
@@ -86,7 +101,7 @@ fn postgres_schema() -> String {
     )
 }
 
-fn sql_error(e: rusqlite::Error) -> String {
+pub(crate) fn sql_error(e: rusqlite::Error) -> String {
     format!("index database: {e}")
 }
 
@@ -95,7 +110,7 @@ fn io_error(e: std::io::Error) -> String {
 }
 
 /// A read connection to an SQLite database that holds an index, if any.
-fn sqlite_index(path: &std::path::Path) -> Result<Option<Connection>> {
+pub(crate) fn sqlite_index(path: &std::path::Path) -> Result<Option<Connection>> {
     if !path.exists() {
         return Ok(None);
     }
@@ -110,23 +125,50 @@ fn sqlite_index(path: &std::path::Path) -> Result<Option<Connection>> {
     Ok((present > 0).then_some(db))
 }
 
+pub(crate) fn has_table(db: &Connection, name: &str) -> Result<bool> {
+    db.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
+        [name],
+        |r| r.get::<_, i64>(0),
+    )
+    .map(|n| n > 0)
+    .map_err(sql_error)
+}
+
 fn sqlite_state(db: &Connection, project: &str, library: &str) -> Result<Option<IndexState>> {
     use rusqlite::OptionalExtension as _;
-    db.query_row(
-        "SELECT root, shelf_root, indexed_at, documents FROM benedict_index_state
-        WHERE project=?1 AND library=?2",
-        params![project, library],
-        |r| {
-            Ok(IndexState {
-                root: r.get(0)?,
-                shelf_root: r.get(1)?,
-                indexed_at: r.get(2)?,
-                documents: r.get::<_, i64>(3)? as u64,
-            })
-        },
-    )
-    .optional()
-    .map_err(sql_error)
+    let state = db
+        .query_row(
+            "SELECT root, shelf_root, indexed_at, documents FROM benedict_index_state
+            WHERE project=?1 AND library=?2",
+            params![project, library],
+            |r| {
+                Ok(IndexState {
+                    root: r.get(0)?,
+                    shelf_root: r.get(1)?,
+                    indexed_at: r.get(2)?,
+                    documents: r.get::<_, i64>(3)? as u64,
+                    vectors_at: String::new(),
+                })
+            },
+        )
+        .optional()
+        .map_err(sql_error)?;
+    let Some(mut state) = state else {
+        return Ok(None);
+    };
+    if has_table(db, "benedict_vector_identity")? {
+        state.vectors_at = db
+            .query_row(
+                "SELECT updated_at FROM benedict_vector_identity WHERE project=?1 AND library=?2",
+                params![project, library],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(sql_error)?
+            .unwrap_or_default();
+    }
+    Ok(Some(state))
 }
 
 /// The fields of one line of COPY text output.
@@ -236,6 +278,7 @@ fn postgres_rows(
 fn state_row(fields: &[String]) -> Result<IndexState> {
     match fields {
         [root, shelf_root, indexed_at, documents] => Ok(IndexState {
+            vectors_at: String::new(),
             root: root.clone(),
             shelf_root: shelf_root.clone(),
             indexed_at: indexed_at.clone(),
@@ -599,6 +642,17 @@ pub(crate) fn load(library: &str, row: &mut dyn FnMut(IndexRow) -> Result<()>) -
                     })
                 },
             )?;
+            if has_table(&tx, "benedict_vectors")? {
+                each(
+                    "SELECT path, vec FROM benedict_vectors WHERE project=?1 AND library=?2 ORDER BY path, part",
+                    &|r| {
+                        Ok(IndexRow::Vector {
+                            path: r.get(0)?,
+                            vec: crate::embed::from_bytes(&r.get::<_, Vec<u8>>(1)?),
+                        })
+                    },
+                )?;
+            }
             Ok(Some(state))
         }
         Database::Postgres(url) => {

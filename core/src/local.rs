@@ -441,6 +441,7 @@ fn build_index(reg: &Registry, key: &str) -> Result<Value> {
         shelf_root: shelf_text.clone(),
         indexed_at: Utc::now().to_rfc3339_opts(SecondsFormat::Micros, false),
         documents,
+        vectors_at: String::new(),
     };
     // Read every document first and keep only the changed ones.
     let mut held = Vec::new();
@@ -795,7 +796,8 @@ pub fn run(cmd: &str, args: &[String]) -> Result<Option<i32>> {
             _ => {}
         }
     }
-    let mut code = 0;
+    // Semantic search that was configured but failed still prints the word results, and says so.
+    let mut code = i32::from(output["semantic"]["status"] == "failed");
     if web {
         let (step, rc) = web_step(name, pos[0])?;
         output["web"] = step;

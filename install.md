@@ -45,8 +45,9 @@ The installer prints one line per step and takes care of these choices:
 | Shelf | None | — |
 | Librarian | Started: rebuilds the index once a day | — |
 | After a reboot | The library starts again by itself | — |
+| Semantic search | On when a 2 GiB embedding server fits beside the library in two thirds of Docker's memory; off with PostgreSQL | Downloads the embedding model once (558 MB) and checks its SHA-256 |
 
-Pass an option only if the user asked for something else: `--memory SIZE`, `--database postgres --database-secret-file FILE`, `--shelf DIR`, `--autostart off`, `--librarian off`. If you want to relay progress yourself, add `--progress json`: standard output then carries one JSON event per step (`step`, `done`, `error` with a `reason`).
+Pass an option only if the user asked for something else: `--memory SIZE`, `--database postgres --database-secret-file FILE`, `--shelf DIR`, `--autostart off`, `--librarian off`, `--semantic on|off`. If you want to relay progress yourself, add `--progress json`: standard output then carries one JSON event per step (`step`, `done`, `error` with a `reason`).
 
 ## 4. If the installer stops
 
@@ -57,7 +58,7 @@ It prints the step, the reason and the log path (`PROJECT/.benedict/install.log`
 - **The bundled skill page was edited.** An upgrade replaces `entities/skill_benedict-library.md` when it is the page an earlier version wrote. If someone changed it, the installer stops. Ask the user before moving their version to another name (for example `entities/skill_benedict-library.local.md`), then run the installer again.
 - **Anything else.** Show the reason line and the last lines of the log. Do not change files or permissions without the user's agreement.
 
-To retry, run the installer again with the same options. Once step 3 has written `PROJECT/.benedict/profile.json`, `bin/install-project PROJECT` with no options also retries with the same choices. To change a choice after that, choose a new project folder.
+To retry, run the installer again with the same options. Once step 3 has written `PROJECT/.benedict/profile.json`, `bin/install-project PROJECT` with no options also retries with the same choices. Semantic search can be turned on or off later with `bin/install-project --semantic on|off PROJECT`. To change another choice after that, choose a new project folder.
 
 ## 5. Show the summary
 

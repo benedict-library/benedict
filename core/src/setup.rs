@@ -23,6 +23,7 @@ fn options(args: &[String]) -> Result<BTreeMap<&str, &str>, String> {
                 | "--shelf"
                 | "--autostart"
                 | "--transcript-days"
+                | "--semantic"
                 | "--output"
                 | "--answers"
         ) || pair.len() != 2
@@ -227,7 +228,20 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
     if transcripts != "keep" && !transcripts.parse::<u64>().is_ok_and(|d| d > 0) {
         return Err("--transcript-days must be keep or a number of days".into());
     }
+    let semantic = match opts.get("--semantic").copied().unwrap_or("off") {
+        "on" => true,
+        "off" => false,
+        _ => return Err("--semantic must be on or off".into()),
+    };
+    if semantic && opts.get("--database").copied() == Some("postgres") {
+        return Err("--semantic on needs the SQLite database".into());
+    }
     let mut env = json!({"LIBRARY_PROJECT":project, "LIBRARY_DB":"/data/library.sqlite3", "LIBRARY_CONFIG":"/data/library.json", "LIBRARY_ROOM_SOCKET":"/data/rooms.sock", "LIBRARY_TRANSCRIPT_DAYS":transcripts});
+    if semantic {
+        // The embedder service of compose.yaml; the model name changes when its pinned file does.
+        env["LIBRARY_EMBED_URL"] = json!(EMBED_URL);
+        env["LIBRARY_EMBED_MODEL"] = json!(EMBED_MODEL);
+    }
     let secret_file = opts
         .get("--database-secret-file")
         .map(|s| host_path(s))
@@ -295,6 +309,9 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
     if empty_shelf {
         profile["volumes"] = json!({"empty_shelf":{}});
     }
+    if semantic {
+        profile["services"]["embedder"] = json!({"restart": restart});
+    }
     if let Some(file) = secret_file {
         profile["secrets"] =
             json!({"library_db_url":{"file":file.to_string_lossy().replace('$',"$$")}});
@@ -306,6 +323,10 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
     }
     Ok((output, profile))
 }
+
+/// The embedding server compose.yaml starts for semantic search, and the model file it serves.
+const EMBED_URL: &str = "http://embedder:8080";
+const EMBED_MODEL: &str = "embeddinggemma-2-BF16@6ea3e3a";
 
 const COMMON_SKILL: &[u8] = include_bytes!("../../docs/skills/benedict-library/SKILL.md");
 // SHA-256 of the bundled skill page as earlier releases wrote it. An upgrade replaces
@@ -835,6 +856,25 @@ mod tests {
         assert!(apply_answers(&mut conflict, &answers("off")).is_err());
     }
     #[test]
+    fn semantic_on_adds_the_embedder_and_its_address() {
+        let own = ["--wiki", "/srv/wiki", "--database", "sqlite", "--memory", "512m", "--shelf", "none", "--autostart", "on"];
+        let mut on = own.to_vec();
+        on.extend(["--semantic", "on"]);
+        let (_, v) = overlay(&base(&on)).unwrap();
+        for service in ["library", "room", "librarian"] {
+            assert_eq!(v["services"][service]["environment"]["LIBRARY_EMBED_URL"], EMBED_URL);
+            assert_eq!(v["services"][service]["environment"]["LIBRARY_EMBED_MODEL"], EMBED_MODEL);
+        }
+        assert_eq!(v["services"]["embedder"]["restart"], "unless-stopped");
+        let (_, v) = overlay(&base(&own)).unwrap();
+        assert!(v["services"].get("embedder").is_none());
+        assert!(v["services"]["room"]["environment"].get("LIBRARY_EMBED_URL").is_none());
+        let mut postgres = args(&["--project", "a", "--output", "x", "--wiki", "/srv/wiki"]);
+        postgres.extend(args(&["--memory", "512m", "--shelf", "none", "--autostart", "on"]));
+        postgres.extend(args(&["--database", "postgres", "--database-secret-file", "/secrets/db", "--semantic", "on"]));
+        assert!(overlay(&postgres).is_err());
+    }
+    #[test]
     fn rejects_overlap_duplicates_and_invalid_values() {
         for extra in [
             &["--shelf", "/wiki/x", "--wiki", "/wiki"][..],
@@ -854,6 +894,7 @@ mod tests {
             &["--memory", "2m"],
             &["--memory", "1g", "--memory", "2g"],
             &["--start", "example", "--autostart", "maybe"],
+            &["--start", "example", "--semantic", "maybe"],
         ] {
             let mut all = args(&["--project", "a", "--output", "x"]);
             all.extend(args(extra));

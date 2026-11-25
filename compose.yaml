@@ -42,5 +42,17 @@ services:
     restart: ${LIBRARY_RESTART:-unless-stopped}
     command: [librarian, --config, /data/library.json, --iterations, "365", --interval, "86400"]
     volumes: *library-mounts
+  # Semantic search: a local embedding server on two CPU cores, no GPU. The installer fetches the
+  # model file into library_models and checks its SHA-256 (see THIRD_PARTY.md). No port is published.
+  embedder:
+    profiles: [semantic]
+    image: ghcr.io/ggml-org/llama.cpp:server-b12464@sha256:5b43086e3ba7ea5794d72904654f6cd41224a9b1c6ac0398f4940ee380d30f23
+    command: [-m, /models/embeddinggemma-2-BF16.gguf, --embedding, --pooling, mean, -t, "2", -c, "2048", -b, "2048", -ub, "2048", --host, 0.0.0.0, --port, "8080"]
+    # Measured at about 220 MiB while embedding; 2 GiB leaves room for longer batches.
+    mem_limit: 2g
+    restart: ${LIBRARY_RESTART:-unless-stopped}
+    volumes:
+      - library_models:/models
 volumes:
   library_data:
+  library_models:
