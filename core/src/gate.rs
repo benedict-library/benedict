@@ -152,10 +152,27 @@ fn handle(mut stream: TcpStream) {
 
 /// `benedict gate --listen ADDRESS`
 pub fn run(args: &[String]) -> Result<()> {
-    let address = match args {
-        [flag, address] if flag == "--listen" => address,
-        _ => return Err("usage: benedict gate --listen HOST:PORT".into()),
+    match args {
+        [flag, address] if flag == "--listen" => listen(address),
+        _ => Err("usage: benedict gate --listen HOST:PORT".into()),
+    }
+}
+
+/// The room service opens the gate beside its socket when LIBRARY_GATE names an address, so a
+/// library stays one container. A gate that cannot open tries again; the room keeps serving.
+pub fn open_beside_room() {
+    let Some(address) = std::env::var("LIBRARY_GATE").ok().filter(|a| !a.trim().is_empty()) else {
+        return;
     };
+    std::thread::spawn(move || loop {
+        if let Err(e) = listen(&address) {
+            eprintln!("{e}; trying again in 5 s");
+        }
+        std::thread::sleep(Duration::from_secs(5));
+    });
+}
+
+fn listen(address: &str) -> Result<()> {
     let listener = TcpListener::bind(address).map_err(|e| format!("gate {address}: {e}"))?;
     eprintln!("gate ready on {address}: search and read only");
     let running = Arc::new(AtomicUsize::new(0));
