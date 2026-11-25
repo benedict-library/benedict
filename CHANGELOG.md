@@ -10,31 +10,6 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The two Docker checks (installation handoff and Plaza on a fresh volume) run as their own jobs beside the test
   matrix instead of after the Rust steps on Linux. Measured twice each: a run took 2m50s and 3m24s instead of 6m04s and
   6m56s. Caching Rust builds as well did not shorten it further (3m12s, 4m23s) and is not added.
-
-### Added
-
-- `benedict mask [--jsonl] [FILE]` masks personal data in a text or JSON Lines file (or standard input) with the same
-  rules as search and read results, so agent transcripts and logs can be kept or analysed without it. JSON Lines are
-  masked string by string: keys, their order and every other value stay as written, and every line still parses. A
-  summary of the lines and the masked kinds goes to standard error. On a 67 MB transcript (11,698 lines) it took 1.1 s
-  and 24 MB of memory.
-
-### Fixed
-
-- A title on its own before `님` (부장님, 사장님, 차장님) was masked as a person's name, because the title starts with a
-  common surname; in one transcript this was 2,619 of 3,150 masked names. Titles are kept now.
-- A number or address right after an escape written out as text (`\\n`, `\\t`, `\\r` in code, logs or JSON inside
-  a string) was not masked, because the escape letter counted as part of it.
-
-### Added
-
-- `docs/embedding.md` (and `docs/embedding.ko.md`) explains what semantic search adds and costs, the four choices
-  (off, the embedder container, a server on the host, a server elsewhere), measured speed of the container against a
-  host server on a Mac, how containers reach the host for each Docker, and `launchd` and `systemd` examples. The
-  installer summary names `--embed-url`, and on macOS with the embedder container it points to that page.
-
-### Changed
-
 - An embedding request from the librarian no longer has a fixed 60-second limit, which cut every batch on a slow
   machine (16 parts took over 60 s on a shared four-core virtual machine) so documents never got vectors. The wait is
   now predicted from the library's own records (`benedict_embed_pace`): twice the slowest recorded time per part,
@@ -44,8 +19,28 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that times out counts as cut and is sent once more. A virtual machine's network stalled a connection for over two
   seconds after a few hundred requests in a row while the server was healthy, which ended the step each time.
 
+### Fixed
+
+- A title on its own before `님` (부장님, 사장님, 차장님) was masked as a person's name, because the title starts with a
+  common surname; in one transcript this was 2,619 of 3,150 masked names. Titles are kept now.
+- A number or address right after an escape written out as text (`\n`, `\t`, `\r` in code, logs or JSON inside
+  a string) was not masked, because the escape letter counted as part of it.
+
 ### Added
 
+- `benedict mask [--jsonl] [FILE]` masks personal data in a text or JSON Lines file (or standard input) with the same
+  rules as search and read results, so agent transcripts and logs can be kept or analysed without it. JSON Lines are
+  masked string by string: keys, their order and every other value stay as written, and every line still parses. A
+  summary of the lines and the masked kinds goes to standard error. On a 67 MB transcript (11,698 lines) it took 1.1 s
+  and 24 MB of memory.
+- `benedict gate --listen HOST:PORT` lets agents in other containers search and read a library without
+  Docker access: one JSON line per connection, `search` and `read` with `--top`, `--pages`, `--question` and
+  `--library` only, masked and recorded as on the command line. The `gate` compose service is off unless
+  started with `--profile gate`; `bin/library-client` is a standard-library client. See `docs/gate.md`.
+- `docs/embedding.md` (and `docs/embedding.ko.md`) explains what semantic search adds and costs, the four choices
+  (off, the embedder container, a server on the host, a server elsewhere), measured speed of the container against a
+  host server on a Mac, how containers reach the host for each Docker, and `launchd` and `systemd` examples. The
+  installer summary names `--embed-url`, and on macOS with the embedder container it points to that page.
 - `install-project` records the image that indexed a project in `.benedict/indexed-image`. A later run with the
   same image (for example `--semantic on|off` or `--embed-url`) keeps the index instead of indexing the whole wiki
   again; a new image indexes again as before.
