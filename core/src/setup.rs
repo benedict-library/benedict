@@ -483,10 +483,7 @@ fn activate(data: &Path) -> Result<(), String> {
         .output()
         .map_err(|e| format!("could not start indexer: {e}"))?;
     if !indexed.status.success() {
-        return Err(format!(
-            "initial wiki indexing failed: {}",
-            String::from_utf8_lossy(&indexed.stderr).trim()
-        ));
+        return Err(indexing_failure(indexed.status, &indexed.stderr));
     }
     let index: Value = serde_json::from_slice(&indexed.stdout)
         .map_err(|e| format!("invalid index result: {e}"))?;
@@ -495,6 +492,24 @@ fn activate(data: &Path) -> Result<(), String> {
         json!({"registry":registry,"wiki":wiki,"database_ready":true,"index":index})
     );
     Ok(())
+}
+
+/// Why the first index failed. A process stopped by the container's memory limit gets signal 9 and
+/// prints nothing, so that case names the setting to raise instead of giving an empty reason.
+fn indexing_failure(status: std::process::ExitStatus, stderr: &[u8]) -> String {
+    #[cfg(unix)]
+    let signal = std::os::unix::process::ExitStatusExt::signal(&status);
+    #[cfg(not(unix))]
+    let signal: Option<i32> = None;
+    let said = String::from_utf8_lossy(stderr).trim().to_string();
+    let reason = if signal == Some(9) {
+        "indexer killed (signal 9), most likely by the memory limit; raise it with --memory SIZE".to_string()
+    } else if said.is_empty() {
+        format!("indexer stopped ({status}) and printed no error")
+    } else {
+        said
+    };
+    format!("initial wiki indexing failed: {reason}")
 }
 
 /// Memory limit in MiB for a wiki of this size, and whether it fits in two thirds of Docker's memory.
@@ -582,6 +597,26 @@ mod tests {
     fn args(s: &[&str]) -> Vec<String> {
         s.iter().map(|s| s.to_string()).collect()
     }
+    #[test]
+    fn a_killed_indexer_names_the_memory_limit() {
+        let run = |script: &str| {
+            std::process::Command::new("sh")
+                .args(["-c", script])
+                .status()
+                .unwrap()
+        };
+        let killed = indexing_failure(run("kill -9 $$"), b"");
+        assert!(killed.starts_with("initial wiki indexing failed: "), "{killed}");
+        assert!(killed.contains("signal 9"), "{killed}");
+        assert!(killed.contains("--memory"), "{killed}");
+        // The installer reports the last 200 characters of its log line, which wraps this in {"error":...}.
+        assert!(killed.len() < 180, "{} characters: {killed}", killed.len());
+        let silent = indexing_failure(run("exit 3"), b"");
+        assert!(silent.contains("printed no error"), "{silent}");
+        let said = indexing_failure(run("exit 3"), b"cannot read entities/x.md\n");
+        assert_eq!(said, "initial wiki indexing failed: cannot read entities/x.md");
+    }
+
     #[test]
     fn recommends_memory_from_measured_wiki_sizes() {
         const MIB: u64 = 1024 * 1024;
