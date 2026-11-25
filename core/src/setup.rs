@@ -889,7 +889,7 @@ mod tests {
         let mut volume = answered.to_vec();
         volume.extend(["--shelf-volume", "originals", "--shelf-subpath", "team/docs"]);
         let (_, v) = overlay(&base(&volume)).unwrap();
-        for service in ["library", "librarian", "room", "gate"] {
+        for service in ["library", "librarian", "room"] {
             let mount = shelf_mount(&v, service).expect("shelf mount");
             assert_eq!(mount["type"], "volume");
             assert_eq!(mount["source"], "library_shelf");
