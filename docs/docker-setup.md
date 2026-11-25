@@ -24,7 +24,7 @@ Use `--wiki-found` only when a candidate wiki has actually been found in the app
 
 Show the recommendation first with its reason. Count **기타 (직접 입력)** as one of at most three choices. When the host adds a built-in free-text choice, use it for `other` and omit the duplicate. If buttons are unavailable, show the same numbered choices and accept a number or the user’s words. Keep the displayed wording and ordering from the question output so the stored prompt matches the user’s choice. Resolve free text before applying it. Never silently map an unrecognized answer to the recommendation.
 
-Use one installation profile as the authority for the selected project, database type, storage mounts and memory limit. Suggest a project name from the selected workspace and show it for confirmation together with the resolved paths. The 512 MiB starting limit applies to each container. Where PostgreSQL needs credentials, request only a reference to an existing protected secret file; keep the connection string out of chat, the interview record, and wiki pages.
+Use one installation profile as the authority for the selected project, database type, storage mounts and memory limit. Suggest a project name from the selected workspace and show it for confirmation together with the resolved paths. The memory limit applies to each container; see [Memory](#memory). Where PostgreSQL needs credentials, request only a reference to an existing protected secret file; keep the connection string out of chat, the interview record, and wiki pages.
 
 ### Record each answer as it happens
 
@@ -77,6 +77,12 @@ Activation verifies wiki access, shelf readability and database initialization b
 `/data/library.json`. An existing registry is preserved. Activation builds the first index so a fresh agent can immediately search the wiki. The default wiki, registry, SQLite database and
 generated indexes persist on the project's data volume. A connected wiki remains on its own host mount. The running room service retains active observations in memory and uses the selected database; the library commands connect over the project volume’s Unix socket.
 
+## Memory
+
+The memory limit applies to each container. Without `--memory`, `bin/install-project` counts the wiki's Markdown pages and bytes and chooses the limit: 1 GiB up to 50,000 pages and 700 MB, then 1 GiB more for each further 50,000 pages, at most two thirds of Docker's memory. Indexing reads one page at a time: a wiki of 42,000 files (540 MB, 31,162 indexed documents) peaked at 0.82 GB including the page cache. `setup --recommend-memory --pages N --bytes N --docker-memory N` prints the same choice.
+
+If the first index still runs out of memory with a limit the installer chose, the installer doubles the limit, up to the same two thirds, and indexes again; its summary says the limit was raised. A limit given with `--memory` is kept: the installation stops with `initial wiki indexing failed: indexer killed (signal 9), most likely by the memory limit; raise it with --memory SIZE`. Run the installer again with a larger `--memory`.
+
 ## Verify a fresh container
 Activation installs the bundled Benedict library skill in the wiki. Run `benedict search benedict-library` or `benedict read entities/skill_benedict-library.md` through the assigned library entry point. Each information boundary needs its own registry, volume, and room service. Only attach sources the recipient may read.
 
@@ -104,7 +110,17 @@ SHA-256 manifest. Use a new archive path outside the wiki and restore into a new
 Both commands verify the Git bundle. Restore also verifies the commit and each Markdown file
 before the recovered wiki becomes visible. Preserve the database and shelf separately.
 
-## Run a librarian cycle
+## The librarian
+
+`bin/install-project` starts the `librarian` service of the `rooms` Compose profile together with the room. Once a day it rebuilds the index, measures the golden questions and records the result. With `--autostart on` it starts again with the host. `--librarian off` installs without it, for example for a read-only wiki. The installation summary shows `Librarian running: rebuilds the index once a day` or `Librarian off`. Check it, or start it later:
+
+```bash
+"${library_compose[@]}" --profile rooms ps librarian
+"${library_compose[@]}" --profile rooms logs --tail 20 librarian
+"${library_compose[@]}" --profile rooms up -d --no-build librarian
+```
+
+### Run a librarian cycle by hand
 
 After activation, run the Rust librarian against the selected library. A golden file contains
 questions paired with expected wiki documents. Supply the path visible inside the container.

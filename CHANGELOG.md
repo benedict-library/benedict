@@ -112,6 +112,12 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A first index stopped by the container's memory limit no longer fails with an empty reason. Setup now reports
+  `initial wiki indexing failed: indexer killed (signal 9), most likely by the memory limit; raise it with --memory
+  SIZE`, and an indexer that stops without printing anything names its exit status. (#2)
+- `docs/docker-setup.md` explains how the installer sizes the memory limit from the wiki and raises it after an
+  out-of-memory first index, and describes the scheduled `librarian` service the installer starts, `--librarian off`
+  and how to check it. It no longer gives the earlier 512 MiB starting limit. (#2, #3)
 - The SQLite database uses WAL mode, so long reads no longer block writes. On 31,164 pages, counting the index's
   words takes 11 seconds and loading the index into the room takes 8. Under the earlier rollback journal, a search
   recorded during either read waited ten seconds and failed with `database is locked`. An existing database switches
