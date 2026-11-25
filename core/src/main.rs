@@ -3,6 +3,7 @@ mod catalog;
 mod embed;
 mod evaluation;
 mod files;
+mod gate;
 mod import;
 mod index_store;
 mod install_journal;
@@ -46,6 +47,7 @@ const HELP: &str = "Benedict — a library for agents and personas
   backup       snapshot or restore the wiki
   mask         mask personal data in a text or JSON Lines file (or standard input)
   room         share tasks, replies and live room observations
+  gate         let agents in other containers search and read (--listen HOST:PORT)
   method       read the library operating guide
   import | web-source   import a skill, wiki page or public source
   version      print the installed Benedict version (see CHANGELOG.md)
@@ -199,6 +201,10 @@ fn run() -> Result<i32, String> {
         }
         "room" => {
             rooms::run(&args)?;
+            return Ok(0);
+        }
+        "gate" => {
+            gate::run(&args)?;
             return Ok(0);
         }
         "record" | "recall" => {
