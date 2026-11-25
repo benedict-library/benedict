@@ -47,7 +47,7 @@ The installer prints one line per step and takes care of these choices:
 | After a reboot | The library starts again by itself | — |
 | Semantic search | On when a 2 GiB embedding server fits beside the library in two thirds of Docker's memory; off with PostgreSQL | Downloads the embedding model once (558 MB) and checks its SHA-256 |
 
-Pass an option only if the user asked for something else: `--memory SIZE`, `--database postgres --database-secret-file FILE`, `--shelf DIR`, `--autostart off`, `--librarian off`, `--semantic on|off`. If you want to relay progress yourself, add `--progress json`: standard output then carries one JSON event per step (`step`, `done`, `error` with a `reason`).
+Pass an option only if the user asked for something else: `--memory SIZE`, `--database postgres --database-secret-file FILE`, `--shelf DIR`, `--autostart off`, `--librarian off`, `--semantic on|off`, `--embed-url http://HOST:PORT` (an embedding server that already runs, reachable from the containers; no embedder service is started). If you want to relay progress yourself, add `--progress json`: standard output then carries one JSON event per step (`step`, `done`, `error` with a `reason`).
 
 ## 4. If the installer stops
 
@@ -76,6 +76,8 @@ bin/install-project PROJECT
 ```
 
 The installer builds the new image, starts the room and the librarian again from it and indexes the wiki again. The profile, the wiki, the shelf and the data volume stay as they are, so the choices made at installation are kept. Do not pass `--start` or `--wiki`. If the librarian was turned off at installation, pass `--librarian off` again; without it the installer starts the librarian.
+
+On a small server, build the image on another machine from the same commit (`docker build -t benedict-library .`), move it to the server with `docker save` and `docker load`, and run `bin/install-project --image benedict-library PROJECT` there; the server then does not compile.
 
 Do not rebuild or restart the containers with `docker compose` yourself: that can leave the librarian on the old version. If the installer stops, follow step 4. Afterwards do step 5, and read the [changelog](CHANGELOG.md) for anything a version asks you to do by hand.
 

@@ -24,6 +24,8 @@ fn options(args: &[String]) -> Result<BTreeMap<&str, &str>, String> {
                 | "--autostart"
                 | "--transcript-days"
                 | "--semantic"
+                | "--embed-url"
+                | "--embed-model"
                 | "--output"
                 | "--answers"
         ) || pair.len() != 2
@@ -228,9 +230,18 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
     if transcripts != "keep" && !transcripts.parse::<u64>().is_ok_and(|d| d > 0) {
         return Err("--transcript-days must be keep or a number of days".into());
     }
-    let semantic = match opts.get("--semantic").copied().unwrap_or("off") {
-        "on" => true,
-        "off" => false,
+    // An embedding server that already runs elsewhere replaces the embedder service.
+    let external = opts.get("--embed-url").copied();
+    if external.is_some_and(|url| !url.starts_with("http://")) {
+        return Err("--embed-url must be an http:// address".into());
+    }
+    if external.is_none() && opts.contains_key("--embed-model") {
+        return Err("--embed-model names the model of --embed-url".into());
+    }
+    let semantic = match (opts.get("--semantic").copied(), external) {
+        (Some("on") | None, Some(_)) | (Some("on"), None) => true,
+        (Some("off") | None, None) => false,
+        (Some("off"), Some(_)) => return Err("--embed-url needs semantic search on".into()),
         _ => return Err("--semantic must be on or off".into()),
     };
     if semantic && opts.get("--database").copied() == Some("postgres") {
@@ -239,8 +250,11 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
     let mut env = json!({"LIBRARY_PROJECT":project, "LIBRARY_DB":"/data/library.sqlite3", "LIBRARY_CONFIG":"/data/library.json", "LIBRARY_ROOM_SOCKET":"/data/rooms.sock", "LIBRARY_TRANSCRIPT_DAYS":transcripts});
     if semantic {
         // The embedder service of compose.yaml; the model name changes when its pinned file does.
-        env["LIBRARY_EMBED_URL"] = json!(EMBED_URL);
-        env["LIBRARY_EMBED_MODEL"] = json!(EMBED_MODEL);
+        env["LIBRARY_EMBED_URL"] = json!(external.unwrap_or(EMBED_URL));
+        env["LIBRARY_EMBED_MODEL"] = json!(match external {
+            Some(_) => opts.get("--embed-model").copied().unwrap_or(EXTERNAL_MODEL),
+            None => EMBED_MODEL,
+        });
     }
     let secret_file = opts
         .get("--database-secret-file")
@@ -309,7 +323,7 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
     if empty_shelf {
         profile["volumes"] = json!({"empty_shelf":{}});
     }
-    if semantic {
+    if semantic && external.is_none() {
         profile["services"]["embedder"] = json!({"restart": restart});
     }
     if let Some(file) = secret_file {
@@ -327,6 +341,8 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
 /// The embedding server compose.yaml starts for semantic search, and the model file it serves.
 const EMBED_URL: &str = "http://embedder:8080";
 const EMBED_MODEL: &str = "embeddinggemma-2-BF16@6ea3e3a";
+/// The model name recorded for vectors from an embedding server set with --embed-url.
+const EXTERNAL_MODEL: &str = "embeddinggemma-2";
 
 const COMMON_SKILL: &[u8] = include_bytes!("../../docs/skills/benedict-library/SKILL.md");
 // SHA-256 of the bundled skill page as earlier releases wrote it. An upgrade replaces
@@ -533,7 +549,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     }
     if args == ["--help"] || args.is_empty() {
         println!(
-            "setup --project NAME --output FILE [--memory 1g] [--database sqlite|postgres] [--database-secret-file /host/secret] [--answers INTERVIEW.json] [--start empty|example] [--wiki /host/wiki] [--shelf /host/shelf] [--autostart on|off]\nsetup --activate\nsetup --recommend-memory --pages N --bytes N --docker-memory N"
+            "setup --project NAME --output FILE [--memory 1g] [--database sqlite|postgres] [--database-secret-file /host/secret] [--answers INTERVIEW.json] [--start empty|example] [--wiki /host/wiki] [--shelf /host/shelf] [--autostart on|off] [--semantic on|off] [--embed-url http://HOST:PORT [--embed-model NAME]]\nsetup --activate\nsetup --recommend-memory --pages N --bytes N --docker-memory N"
         );
         return Ok(());
     }
@@ -873,6 +889,22 @@ mod tests {
         postgres.extend(args(&["--memory", "512m", "--shelf", "none", "--autostart", "on"]));
         postgres.extend(args(&["--database", "postgres", "--database-secret-file", "/secrets/db", "--semantic", "on"]));
         assert!(overlay(&postgres).is_err());
+        // An embedding server that already runs elsewhere: its address, no embedder service.
+        let mut external = own.to_vec();
+        external.extend(["--embed-url", "http://embeddings.example:8080", "--embed-model", "eg2"]);
+        let (_, v) = overlay(&base(&external)).unwrap();
+        assert_eq!(v["services"]["room"]["environment"]["LIBRARY_EMBED_URL"], "http://embeddings.example:8080");
+        assert_eq!(v["services"]["librarian"]["environment"]["LIBRARY_EMBED_MODEL"], "eg2");
+        assert!(v["services"].get("embedder").is_none());
+        for wrong in [
+            &["--embed-url", "https://example.org"][..],
+            &["--embed-url", "http://x:1", "--semantic", "off"],
+            &["--embed-model", "eg2"],
+        ] {
+            let mut all = own.to_vec();
+            all.extend(wrong);
+            assert!(overlay(&base(&all)).is_err(), "{wrong:?}");
+        }
     }
     #[test]
     fn rejects_overlap_duplicates_and_invalid_values() {
