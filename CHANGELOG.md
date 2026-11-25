@@ -21,6 +21,9 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A mobile number with markdown bold right before or after it (`**010-1234-5678**`, common in model answers) was
+  not masked, because the stars counted as part of the number. Stars stay part of a number only when they continue
+  its digits, as in an already masked `010****5678`. Found in a real agent transcript.
 - A title on its own before `님` (부장님, 사장님, 차장님) was masked as a person's name, because the title starts with a
   common surname; in one transcript this was 2,619 of 3,150 masked names. Titles are kept now.
 - A number or address right after an escape written out as text (`\n`, `\t`, `\r` in code, logs or JSON inside

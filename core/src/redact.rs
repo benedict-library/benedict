@@ -100,6 +100,16 @@ fn escape_letter(chars: &[char], i: usize) -> bool {
     i > 0 && chars[i - 1] == '\\' && "ntr".contains(chars[i])
 }
 
+/// Stars before a number belong to it only when they continue digits (010****5678);
+/// markdown bold before a number (**010-…) does not.
+fn stars_continue_digits(chars: &[char], i: usize) -> bool {
+    let mut k = i;
+    while k > 0 && chars[k - 1] == '*' {
+        k -= 1;
+    }
+    k > 0 && chars[k - 1].is_ascii_digit()
+}
+
 fn emails(chars: &[char], hits: &mut Vec<Hit>) {
     let local_ok = |c: char| c.is_ascii_alphanumeric() || "._%+-".contains(c);
     let dom_ok = |c: char| c.is_ascii_alphanumeric() || ".-".contains(c);
@@ -152,7 +162,7 @@ fn numbers(chars: &[char], hits: &mut Vec<Hit>) {
         let prev_bad = i > 0 && {
             let p = chars[i - 1];
             (p.is_ascii_alphanumeric() && !escape_letter(chars, i - 1))
-                || p == '*'
+                || (p == '*' && stars_continue_digits(chars, i))
                 || ((p == '.' || p == ',' || p == ':') && i > 1 && chars[i - 2].is_ascii_digit())
         };
         let start = i;
@@ -178,7 +188,33 @@ fn numbers(chars: &[char], hits: &mut Vec<Hit>) {
                 break;
             }
         }
-        let end = j;
+        let mut end = j;
+        // Markdown bold right after a number (**010-1234-5678**) is not part of it: stars are
+        // dropped only when the number matches without them, so a masked number keeps its stars.
+        let trail = groups
+            .last()
+            .map_or(0, |g| g.chars().rev().take_while(|&c| c == '*').count());
+        if trail > 0 && groups.last().is_some_and(|g| g.chars().count() > trail) {
+            let mut bare = groups.clone();
+            let last = bare.pop().unwrap_or_default();
+            bare.push(last.chars().take(last.chars().count() - trail).collect());
+            let lens: Vec<usize> = groups.iter().map(|g| g.chars().count()).collect();
+            let bare_lens: Vec<usize> = bare.iter().map(|g| g.chars().count()).collect();
+            let ctx = before(chars, start, 20);
+            if classify(plus, &lens, &groups.concat(), lens.iter().sum(), &ctx).is_none()
+                && classify(
+                    plus,
+                    &bare_lens,
+                    &bare.concat(),
+                    bare_lens.iter().sum(),
+                    &ctx,
+                )
+                .is_some()
+            {
+                groups = bare;
+                end = j - trail;
+            }
+        }
         let next_bad = end < n && {
             let q = chars[end];
             q.is_ascii_alphanumeric()
@@ -461,7 +497,12 @@ pub fn value(output: &mut serde_json::Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    const MASKED: [(&str, &str); 35] = [
+    const MASKED: [(&str, &str); 37] = [
+        (
+            "연락처는 **010-1234-5678**입니다",
+            "연락처는 **010-****-5678**입니다",
+        ),
+        ("이미 가린 010****5678", "이미 가린 010****5678"),
         ("줄바꿈\\n010-1234-5678", "줄바꿈\\n010-****-5678"),
         ("메일\\nhong@example.com", "메일\\n[이메일]"),
         ("휴대폰010-1234-5678/메일", "휴대폰010-****-5678/메일"),
