@@ -345,12 +345,12 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
     }
     let service = json!({"mem_limit":memory, "volumes":mounts, "environment":env});
     let mut profile = json!({"name":project,"services":{"library":service,"librarian":service,
-        "room":service,"gate":service}});
+        "room":service}});
     if example {
         profile["services"]["library"]["environment"]["LIBRARY_START"] = "example".into();
     }
     // Only the long-running services restart; the library service runs one command and exits.
-    for svc in ["room", "librarian", "gate"] {
+    for svc in ["room", "librarian"] {
         profile["services"][svc]["restart"] = restart.into();
     }
     if empty_shelf {
@@ -366,7 +366,7 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
     if let Some(file) = secret_file {
         profile["secrets"] =
             json!({"library_db_url":{"file":file.to_string_lossy().replace('$',"$$")}});
-        for svc in ["library", "room", "gate"] {
+        for svc in ["library", "room"] {
             let service = &mut profile["services"][svc];
             service["secrets"] = json!(["library_db_url"]);
             service["environment"]["LIBRARY_DB_URL_FILE"] = "/run/secrets/library_db_url".into();
@@ -871,7 +871,7 @@ mod tests {
         let mut none = answered.to_vec();
         none.extend(["--shelf", "none"]);
         let (_, v) = overlay(&base(&none)).unwrap();
-        for service in ["library", "librarian", "room", "gate"] {
+        for service in ["library", "librarian", "room"] {
             let mount = shelf_mount(&v, service).expect("empty shelf mount");
             assert_eq!(mount["type"], "volume");
             assert_eq!(mount["source"], "empty_shelf");

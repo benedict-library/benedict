@@ -380,6 +380,7 @@ fn serve(path: &Path) -> Result<()> {
     }
     let listener = UnixListener::bind(path).map_err(err)?;
     fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(err)?;
+    crate::gate::open_beside_room();
     let mut memory = LiveMemory::new();
     // The search room loads each library's index in the background as the service starts.
     if let Some(config) = env::var_os("LIBRARY_CONFIG") {

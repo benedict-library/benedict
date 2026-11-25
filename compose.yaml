@@ -22,6 +22,8 @@ services:
     <<: *runtime
     environment:
       LIBRARY_ROOM_SOCKET: /data/rooms.sock
+      # HOST:PORT opens the search-and-read gate inside this container; empty keeps it closed. See docs/gate.md.
+      LIBRARY_GATE: ${LIBRARY_GATE:-}
     command: [room, serve]
     # Installed profiles set this from the autostart answer.
     restart: ${LIBRARY_RESTART:-unless-stopped}
@@ -41,18 +43,6 @@ services:
         condition: service_healthy
     restart: ${LIBRARY_RESTART:-unless-stopped}
     command: [librarian, --config, /data/library.json, --iterations, "365", --interval, "86400"]
-    volumes: *library-mounts
-  gate:
-    # Off unless asked for: `--profile gate`. Search and read only; see docs/gate.md.
-    profiles: [gate]
-    <<: *runtime
-    environment:
-      LIBRARY_ROOM_SOCKET: /data/rooms.sock
-    depends_on:
-      room:
-        condition: service_healthy
-    restart: ${LIBRARY_RESTART:-unless-stopped}
-    command: [gate, --listen, "0.0.0.0:8740"]
     volumes: *library-mounts
   # Semantic search: a local embedding server on two CPU cores, no GPU. The installer fetches the
   # model file into library_models and checks its SHA-256 (see THIRD_PARTY.md). No port is published.
