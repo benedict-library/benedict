@@ -67,7 +67,10 @@ pub(crate) const VECTOR_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS benedict_vect
         vec BLOB NOT NULL, PRIMARY KEY (project, library, path, part)) WITHOUT ROWID;
     CREATE TABLE IF NOT EXISTS benedict_vector_identity (project TEXT NOT NULL, library TEXT NOT NULL,
         model TEXT NOT NULL, dim INTEGER NOT NULL, updated_at TEXT NOT NULL,
-        PRIMARY KEY (project, library)) WITHOUT ROWID;";
+        PRIMARY KEY (project, library)) WITHOUT ROWID;
+    CREATE TABLE IF NOT EXISTS benedict_embed_pace (project TEXT NOT NULL, library TEXT NOT NULL,
+        seq INTEGER NOT NULL, at TEXT NOT NULL, seconds_per_part REAL NOT NULL, cut INTEGER NOT NULL,
+        PRIMARY KEY (project, library, seq)) WITHOUT ROWID;";
 
 /// Index writers wait this long for the room's reads to finish.
 pub(crate) const WRITE_WAIT: Duration = Duration::from_secs(120);

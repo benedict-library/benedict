@@ -22,7 +22,12 @@ Semantic search (SQLite installations): with `LIBRARY_EMBED_URL` set (an `http:/
 `POST /v1/embeddings`, such as the `embedder` service of the `semantic` compose profile) and `LIBRARY_EMBED_MODEL`
 naming its model, the librarian embeds each changed document after indexing, in 1,000-character parts, at most
 2,000 parts a cycle, and stores the vectors in the database (`benedict_vectors`, `benedict_vector_identity`). A new
-model name embeds every document again. The search room loads the vectors with the index and fuses the word ranking
+model name embeds every document again. A request has no fixed time limit: it may take twice the slowest recorded time
+per part times its parts (eight times wider while a library has fewer than five records; the first prediction is
+0.5 s per part). Each request's time per part is recorded in `benedict_embed_pace` (the last 50); a request cut by
+its wait is recorded at that wait, as a lower bound, and sent once more with the longer wait, and the step reports
+`cut`. A slow machine is therefore waited on as long as it needs, and a server that never answers is left to the next
+cycle. The search room loads the vectors with the index and fuses the word ranking
 with the vector ranking (best part per document, reciprocal rank fusion with k = 60 over the top 50 of each). Results
 carry `engine` (`lexical-bm25` or `hybrid-rrf`) and `semantic.status`: `not_configured` without a server,
 `partial` while documents still wait for vectors, and `failed` with the reason when the server does not answer; then

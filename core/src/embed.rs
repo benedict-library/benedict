@@ -14,8 +14,8 @@ const QUERY: &str = "task: search result | query: ";
 const CONNECT: Duration = Duration::from_secs(2);
 /// A query took about 50 ms on two cores without a GPU; two seconds leaves room for a busy server.
 pub(crate) const QUERY_WAIT: Duration = Duration::from_secs(2);
-/// A batch of 16 document parts took about 8 seconds on two cores.
-pub(crate) const BATCH_WAIT: Duration = Duration::from_secs(60);
+/// The words that mark a request cut because the wait ran out while the server was still working.
+const CUT: &str = "no answer within";
 
 /// The embedding server's address, when semantic search is configured.
 pub(crate) fn url() -> Option<String> {
@@ -58,13 +58,15 @@ pub(crate) fn embed(url: &str, texts: &[String], wait: Duration) -> Result<Vec<V
         "POST /v1/embeddings HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|e| format!("embedding server {host}: {e}"))?;
+    let io = |e: std::io::Error| match e.kind() {
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
+            format!("embedding server {host}: {CUT} {:.1} s", wait.as_secs_f64())
+        }
+        _ => format!("embedding server {host}: {e}"),
+    };
+    stream.write_all(request.as_bytes()).map_err(io)?;
     let mut response = Vec::new();
-    stream
-        .read_to_end(&mut response)
-        .map_err(|e| format!("embedding server {host}: {e}"))?;
+    stream.read_to_end(&mut response).map_err(io)?;
     let split = response
         .windows(4)
         .position(|w| w == b"\r\n\r\n")
@@ -100,6 +102,11 @@ pub(crate) fn embed(url: &str, texts: &[String], wait: Duration) -> Result<Vec<V
         return Err("embedding server: vectors differ in length".into());
     }
     Ok(vectors.into_iter().map(normalized).collect())
+}
+
+/// Whether an error from `embed` means the wait ran out, rather than a server that is down or wrong.
+pub(crate) fn was_cut(error: &str) -> bool {
+    error.contains(CUT)
 }
 
 fn dechunk(mut body: &[u8]) -> Result<Vec<u8>> {
@@ -177,6 +184,23 @@ mod tests {
         let gone = format!("http://{}", listener.local_addr().unwrap());
         drop(listener);
         assert!(embed(&gone, &["a".into()], QUERY_WAIT).is_err());
+    }
+
+    #[test]
+    fn a_request_past_its_wait_is_reported_as_cut() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut buf = [0; 4096];
+            let _ = s.read(&mut buf);
+            std::thread::sleep(Duration::from_millis(500));
+            let _ = s.write_all(b"HTTP/1.1 200 OK\r\n\r\n{}");
+        });
+        let e = embed(&format!("http://{address}"), &["a".into()], Duration::from_millis(50)).unwrap_err();
+        assert!(was_cut(&e), "{e}");
+        let e = embed(&serve("HTTP/1.1 503 Busy\r\n\r\nloading".into()), &["a".into()], QUERY_WAIT).unwrap_err();
+        assert!(!was_cut(&e), "{e}");
     }
 
     #[test]
