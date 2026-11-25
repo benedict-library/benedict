@@ -7,7 +7,7 @@ source_args=()
 answer_args=()
 progress=
 librarian=on
-given_database= given_memory= given_shelf= given_autostart= given_transcripts= given_semantic=
+given_database= given_memory= given_shelf= given_shelf_volume= given_shelf_subpath= given_autostart= given_transcripts= given_semantic=
 given_embed_url= given_embed_model= given_image=
 while [[ ${1:-} == --* ]]; do
   [[ -n ${2:-} ]] || { echo "$1 needs a value" >&2; exit 2; }
@@ -55,6 +55,12 @@ while [[ ${1:-} == --* ]]; do
         [[ -d $2 ]] || { echo 'select an existing shelf folder, or --shelf none' >&2; exit 2; }
         given_shelf=$(cd -- "$2" && pwd -P)
       fi ;;
+    --shelf-volume)
+      # Network storage: a Docker volume the user created (for example the local driver with type=cifs or nfs).
+      docker volume inspect -- "$2" >/dev/null 2>&1 || { echo "create the Docker volume $2 first, or select --shelf DIR|none" >&2; exit 2; }
+      given_shelf_volume=$2 ;;
+    --shelf-subpath)
+      given_shelf_subpath=$2 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
   shift 2
@@ -66,7 +72,7 @@ if [[ -n $given_embed_url ]]; then
   given_semantic=on
 fi
 if (( $# < 1 || $# > 2 )); then
-  echo 'usage: bin/install-project [--start example|empty | --wiki DIR] [--database sqlite|postgres] [--database-secret-file FILE] [--memory SIZE] [--shelf DIR|none] [--autostart on|off] [--librarian on|off] [--semantic on|off] [--embed-url URL [--embed-model NAME]] [--image IMAGE] [--transcript-days N|keep] [--progress json] EXISTING_WORKSPACE [CONFIRMED_COMPOSE_PROFILE.json]' >&2
+  echo 'usage: bin/install-project [--start example|empty | --wiki DIR] [--database sqlite|postgres] [--database-secret-file FILE] [--memory SIZE] [--shelf DIR|none | --shelf-volume NAME [--shelf-subpath DIR]] [--autostart on|off] [--librarian on|off] [--semantic on|off] [--embed-url URL [--embed-model NAME]] [--image IMAGE] [--transcript-days N|keep] [--progress json] EXISTING_WORKSPACE [CONFIRMED_COMPOSE_PROFILE.json]' >&2
   exit 2
 fi
 repo=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
@@ -140,7 +146,7 @@ else
     project=benedict-$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')
   fi
 fi
-given=$given_database$given_memory$given_shelf$given_autostart$given_transcripts
+given=$given_database$given_memory$given_shelf$given_shelf_volume$given_shelf_subpath$given_autostart$given_transcripts
 if [[ -f $profile ]] && { (( ${#source_args[@]} + ${#answer_args[@]} )) || [[ -n $given ]]; }; then
   echo 'This project already has a profile. Use that profile or choose a new workspace.' >&2
   exit 2
@@ -282,7 +288,13 @@ begin profile "Writing the installation profile"
 if [[ -e $profile && -z $given_memory ]]; then memory_note="kept from the installation"; fi
 if (( $# == 1 )) && [[ ! -e $profile ]]; then
   if [[ ${source_args[1]:-} != example ]]; then
-    answer_args+=(--database "${given_database:-sqlite}" --memory "$memory" --shelf "${given_shelf:-none}")
+    answer_args+=(--database "${given_database:-sqlite}" --memory "$memory")
+    if [[ -n $given_shelf_volume ]]; then
+      answer_args+=(--shelf-volume "$given_shelf_volume")
+      if [[ -n $given_shelf_subpath ]]; then answer_args+=(--shelf-subpath "$given_shelf_subpath"); fi
+    else
+      answer_args+=(--shelf "${given_shelf:-none}")
+    fi
   elif [[ -n $given_memory ]]; then
     answer_args+=(--memory "$memory")
   fi
@@ -409,7 +421,7 @@ if [[ $progress != json ]]; then
   Conversations     $kept
   Log               $log
 To change a choice, install into a new project folder with --memory SIZE, --database postgres
---database-secret-file FILE, --shelf DIR, --autostart off, --librarian off or --transcript-days N.
+--database-secret-file FILE, --shelf DIR or --shelf-volume NAME, --autostart off, --librarian off or --transcript-days N.
 Turn semantic search on or off in this project with bin/install-project --semantic on|off PROJECT,
 or use an embedding server that already runs with --embed-url http://HOST:PORT (docs/embedding.md).
 SUMMARY

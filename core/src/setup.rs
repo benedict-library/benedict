@@ -21,6 +21,8 @@ fn options(args: &[String]) -> Result<BTreeMap<&str, &str>, String> {
                 | "--start"
                 | "--wiki"
                 | "--shelf"
+                | "--shelf-volume"
+                | "--shelf-subpath"
                 | "--autostart"
                 | "--transcript-days"
                 | "--semantic"
@@ -141,7 +143,8 @@ fn apply_answers(
     }
     // The bundled example shelf belongs to the example start; own material connects a folder or starts with no shelf.
     let example = opts.get("--start") == Some(&"example");
-    let shelf = opts.get("--shelf").copied();
+    // A network storage volume answers the folder choice as a host folder does.
+    let shelf = opts.get("--shelf").or(opts.get("--shelf-volume")).copied();
     match (answers.get("shelf").map(String::as_str), shelf) {
         (None, _) if example => (),
         (None, _) => return Err(selected("shelf").unwrap_err()),
@@ -210,7 +213,8 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
             ("--shelf", "shelf"),
             ("--autostart", "autostart"),
         ] {
-            if !opts.contains_key(option) {
+            let volume = option == "--shelf" && opts.contains_key("--shelf-volume");
+            if !opts.contains_key(option) && !volume {
                 return Err(crate::wizard::prompt(step, own)?.to_string());
             }
         }
@@ -279,6 +283,27 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
         .filter(|s| **s != "none")
         .map(|s| host_path(s))
         .transpose()?;
+    // Network storage (an SMB or NFS share, for example) reaches the containers as a Docker volume the user created.
+    let volume = opts.get("--shelf-volume").copied();
+    let subpath = opts.get("--shelf-subpath").copied();
+    if volume.is_some() && opts.contains_key("--shelf") {
+        return Err("choose a shelf folder or a shelf volume, not both".into());
+    }
+    if volume.is_some_and(|v| {
+        !v.starts_with(|c: char| c.is_ascii_alphanumeric())
+            || !v.chars().all(|c| c.is_ascii_alphanumeric() || "_.-".contains(c))
+    }) {
+        return Err("--shelf-volume must name an existing Docker volume".into());
+    }
+    match subpath {
+        Some(_) if volume.is_none() => {
+            return Err("--shelf-subpath names a folder inside --shelf-volume".into());
+        }
+        Some(s) if !Path::new(s).components().all(|c| matches!(c, Component::Normal(_))) => {
+            return Err("--shelf-subpath must be a relative folder inside the volume".into());
+        }
+        _ => (),
+    }
     if let (Some(w), Some(s)) = (wiki, shelf) {
         if w.starts_with(s) || s.starts_with(w) {
             return Err("the writable wiki and read-only shelf paths must not overlap".into());
@@ -302,6 +327,14 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
             );
         }
     }
+    if volume.is_some() {
+        let mut options = json!({"nocopy":true});
+        if let Some(s) = subpath {
+            options["subpath"] = json!(s.replace('$', "$$"));
+        }
+        mounts.push(json!({"type":"volume","source":"library_shelf","target":"/shelf",
+            "read_only":true,"volume":options}));
+    }
     if empty_shelf {
         // An empty named volume replaces the bundled example shelf; nocopy keeps image files out of it.
         mounts.push(json!({"type":"volume","source":"empty_shelf","target":"/shelf",
@@ -322,6 +355,10 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
     }
     if empty_shelf {
         profile["volumes"] = json!({"empty_shelf":{}});
+    }
+    if let Some(name) = volume {
+        // External: the installation reads the volume and never creates or removes it.
+        profile["volumes"] = json!({"library_shelf":{"external":true,"name":name}});
     }
     if semantic && external.is_none() {
         profile["services"]["embedder"] = json!({"restart": restart});
@@ -564,7 +601,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     }
     if args == ["--help"] || args.is_empty() {
         println!(
-            "setup --project NAME --output FILE [--memory 1g] [--database sqlite|postgres] [--database-secret-file /host/secret] [--answers INTERVIEW.json] [--start empty|example] [--wiki /host/wiki] [--shelf /host/shelf] [--autostart on|off] [--semantic on|off] [--embed-url http://HOST:PORT [--embed-model NAME]]\nsetup --activate\nsetup --recommend-memory --pages N --bytes N --docker-memory N"
+            "setup --project NAME --output FILE [--memory 1g] [--database sqlite|postgres] [--database-secret-file /host/secret] [--answers INTERVIEW.json] [--start empty|example] [--wiki /host/wiki] [--shelf /host/shelf | --shelf-volume NAME [--shelf-subpath DIR]] [--autostart on|off] [--semantic on|off] [--embed-url http://HOST:PORT [--embed-model NAME]]\nsetup --activate\nsetup --recommend-memory --pages N --bytes N --docker-memory N"
         );
         return Ok(());
     }
@@ -845,6 +882,46 @@ mod tests {
         let mut both = none.clone();
         both.extend(["--start", "example"]);
         assert!(overlay(&base(&both)).is_err());
+    }
+    #[test]
+    fn a_network_storage_volume_becomes_the_read_only_shelf() {
+        let answered = ["--wiki", "/srv/wiki", "--database", "sqlite", "--memory", "512m", "--autostart", "on"];
+        let mut volume = answered.to_vec();
+        volume.extend(["--shelf-volume", "originals", "--shelf-subpath", "team/docs"]);
+        let (_, v) = overlay(&base(&volume)).unwrap();
+        for service in ["library", "librarian", "room", "gate"] {
+            let mount = shelf_mount(&v, service).expect("shelf mount");
+            assert_eq!(mount["type"], "volume");
+            assert_eq!(mount["source"], "library_shelf");
+            assert_eq!(mount["read_only"], true);
+            assert_eq!(mount["volume"]["subpath"], "team/docs");
+        }
+        assert_eq!(v["volumes"]["library_shelf"], json!({"external":true,"name":"originals"}));
+        let mut both = volume.clone();
+        both.extend(["--shelf", "/srv/originals"]);
+        assert!(overlay(&base(&both)).is_err(), "a folder and a volume at once");
+        for bad in [["--shelf-subpath", "../x"], ["--shelf-subpath", "/abs"], ["--shelf-volume", "bad name"]] {
+            let mut wrong = answered.to_vec();
+            wrong.extend(["--shelf-volume", "originals"]);
+            if bad[0] == "--shelf-volume" {
+                wrong.truncate(wrong.len() - 2);
+            }
+            wrong.extend(bad);
+            assert!(overlay(&base(&wrong)).is_err(), "{bad:?}");
+        }
+        let mut alone = answered.to_vec();
+        alone.extend(["--shelf-subpath", "team"]);
+        assert!(overlay(&base(&alone)).is_err(), "a subpath needs a volume");
+        let answers: BTreeMap<String, String> = [("start", "wiki"), ("database", "sqlite"), ("memory", "default"), ("shelf", "folder")]
+            .into_iter()
+            .map(|(k, s)| (k.to_owned(), s.to_owned()))
+            .collect();
+        let mut by_volume = BTreeMap::from([("--wiki", "/wiki"), ("--shelf-volume", "originals")]);
+        apply_answers(&mut by_volume, &answers).unwrap();
+        let mut none_but_volume = BTreeMap::from([("--wiki", "/wiki"), ("--shelf-volume", "originals")]);
+        let mut said_none = answers.clone();
+        said_none.insert("shelf".into(), "none".into());
+        assert!(apply_answers(&mut none_but_volume, &said_none).is_err());
     }
     #[test]
     fn the_example_keeps_its_one_line_start_and_its_own_shelf() {

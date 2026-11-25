@@ -5,6 +5,14 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- The shelf can be network storage. `setup` and `install-project` accept `--shelf-volume NAME` (a Docker volume the user
+  created, for example an SMB or NFS share through the local driver) and `--shelf-subpath DIR` for one folder inside it;
+  the profile mounts it read-only as an external volume. A host share mounted on macOS or Windows may not reach Docker's
+  virtual machine, while such a volume mounts the share inside it. `install.md` now has the installing agent find where
+  the originals live and check that a container can read them before it picks the shelf.
+
 ### Changed
 
 - The two Docker checks (installation handoff and Plaza on a fresh volume) run as their own jobs beside the test
