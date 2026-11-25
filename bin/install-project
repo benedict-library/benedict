@@ -320,6 +320,12 @@ if [[ -z $semantic ]]; then
 fi
 export LIBRARY_IMAGE="$image"
 compose=(docker compose -p "$project" -f "$base" -f "$profile")
+# The word index depends on the image, not on the settings. A run with the image that last indexed
+# this project only changes settings, so it keeps the index; the librarian keeps it current.
+indexed_by=$state/indexed-image
+image_id=$(docker image inspect --format '{{.Id}}' "$image")
+keep_index=false
+if [[ -f $indexed_by && $(<"$indexed_by") == "$image_id" ]]; then keep_index=true; fi
 
 begin room "Starting the room service"
 if [[ $semantic == on ]] && jq -e '.services.embedder' "$profile" >/dev/null; then
@@ -338,6 +344,9 @@ elif [[ -n $given_semantic ]]; then
 fi
 quiet "${compose[@]}" up -d --no-build --wait room
 
+if [[ $keep_index == true ]]; then
+  begin index "Keeping the index (indexed with this image)"
+else
 begin index "Indexing the wiki"
 # If initial indexing runs out of memory with a limit the installer chose, double it and try again.
 cap_mib=$(( docker_memory / 1048576 / 3 * 2 ))
@@ -356,6 +365,8 @@ while ! quiet "${compose[@]}" run --rm -T library setup --activate; do
   printf '  initial indexing ran out of memory at %sm; retrying with %sm\n' "$limit_mib" "$next_mib" >>"$log"
   quiet "${compose[@]}" up -d --no-build --wait room
 done
+printf '%s\n' "$image_id" >"$indexed_by"
+fi
 documents=$(grep -o '"documents":[0-9]*' "$log" | tail -n 1 | cut -d: -f2 || true)
 
 begin finish "Starting the librarian and adding project instructions"
@@ -389,7 +400,7 @@ if [[ $progress != json ]]; then
   if [[ $transcripts == keep ]]; then kept='kept on the shelf'; else kept="kept on the shelf for $transcripts days"; fi
   cat <<SUMMARY
   Started from      $from
-  Indexed           ${documents:-?} documents in $(( $(date +%s) - started ))s
+  Indexed           $([[ $keep_index == true ]] && echo "kept: indexed earlier with this image" || echo "${documents:-?} documents in $(( $(date +%s) - started ))s")
   Memory limit      $(( limit / 1048576 ))m per container ($memory_note)
   Database          $database
   Librarian         $keeper

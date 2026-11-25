@@ -7,6 +7,9 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `install-project` records the image that indexed a project in `.benedict/indexed-image`. A later run with the
+  same image (for example `--semantic on|off` or `--embed-url`) keeps the index instead of indexing the whole wiki
+  again; a new image indexes again as before.
 - `setup` and `install-project` accept `--embed-url http://HOST:PORT` (and `--embed-model NAME`) to use an
   embedding server that already runs instead of starting the `embedder` service. `install-project --image IMAGE`
   uses an image built on another machine and loaded with `docker load`, so a small server does not compile.
