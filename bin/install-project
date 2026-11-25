@@ -8,6 +8,7 @@ answer_args=()
 progress=
 librarian=on
 given_database= given_memory= given_shelf= given_autostart= given_transcripts= given_semantic=
+given_embed_url= given_embed_model= given_image=
 while [[ ${1:-} == --* ]]; do
   [[ -n ${2:-} ]] || { echo "$1 needs a value" >&2; exit 2; }
   case $1 in
@@ -34,6 +35,13 @@ while [[ ${1:-} == --* ]]; do
     --semantic)
       [[ $2 == on || $2 == off ]] || { echo 'expected --semantic on or off' >&2; exit 2; }
       given_semantic=$2 ;;
+    --embed-url)
+      [[ $2 == http://* ]] || { echo 'expected --embed-url http://HOST:PORT' >&2; exit 2; }
+      given_embed_url=$2 ;;
+    --embed-model)
+      given_embed_model=$2 ;;
+    --image)
+      given_image=$2 ;;
     --transcript-days)
       [[ $2 == keep || $2 =~ ^[1-9][0-9]*$ ]] || { echo 'expected --transcript-days keep or a number of days' >&2; exit 2; }
       given_transcripts=$2 ;;
@@ -51,8 +59,14 @@ while [[ ${1:-} == --* ]]; do
   esac
   shift 2
 done
+# An embedding server that already runs elsewhere turns semantic search on without the embedder service.
+if [[ -n $given_embed_model && -z $given_embed_url ]]; then echo '--embed-model names the model of --embed-url' >&2; exit 2; fi
+if [[ -n $given_embed_url ]]; then
+  [[ $given_semantic != off ]] || { echo '--embed-url needs semantic search on' >&2; exit 2; }
+  given_semantic=on
+fi
 if (( $# < 1 || $# > 2 )); then
-  echo 'usage: bin/install-project [--start example|empty | --wiki DIR] [--database sqlite|postgres] [--database-secret-file FILE] [--memory SIZE] [--shelf DIR|none] [--autostart on|off] [--librarian on|off] [--semantic on|off] [--transcript-days N|keep] [--progress json] EXISTING_WORKSPACE [CONFIRMED_COMPOSE_PROFILE.json]' >&2
+  echo 'usage: bin/install-project [--start example|empty | --wiki DIR] [--database sqlite|postgres] [--database-secret-file FILE] [--memory SIZE] [--shelf DIR|none] [--autostart on|off] [--librarian on|off] [--semantic on|off] [--embed-url URL [--embed-model NAME]] [--image IMAGE] [--transcript-days N|keep] [--progress json] EXISTING_WORKSPACE [CONFIRMED_COMPOSE_PROFILE.json]' >&2
   exit 2
 fi
 repo=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
@@ -150,7 +164,7 @@ stage=$state/install.lock
 trap 'rm -f -- "$stage/library" "$stage/AGENTS.md" "$stage/CLAUDE.md" "$stage/GEMINI.md" "$stage/profile.json"; rmdir -- "$stage"' EXIT
 log=$state/install.log
 printf '\n== %s install-project\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$log"
-image=${LIBRARY_IMAGE:-$project-library}
+image=${given_image:-${LIBRARY_IMAGE:-$project-library}}
 base=$repo/compose.yaml
 start='<!-- Benedict project instructions -->'
 end='<!-- End Benedict project instructions -->'
@@ -195,8 +209,14 @@ elif [[ -f $state/library ]] && ! cmp -s "$stage/library" "$state/library"; then
   echo 'existing entry point uses different installation settings; use its original checkout and profile' >&2; exit 2
 fi
 
-begin image "Building the library image"
-quiet docker build --quiet --tag "$image" "$repo"
+if [[ -n $given_image ]]; then
+  # An image built on another machine and loaded here; this machine does not compile.
+  begin image "Checking the library image"
+  quiet docker image inspect --format '{{.Id}}' "$image"
+else
+  begin image "Building the library image"
+  quiet docker build --quiet --tag "$image" "$repo"
+fi
 
 begin check "Checking the wiki and memory"
 pages=0 memory=${given_memory:-1g} memory_note=default fits=true
@@ -267,19 +287,26 @@ if (( $# == 1 )) && [[ ! -e $profile ]]; then
     answer_args+=(--memory "$memory")
   fi
   answer_args+=(--autostart "${given_autostart:-on}" --transcript-days "${given_transcripts:-keep}" --semantic "$semantic")
+  if [[ -n $given_embed_url ]]; then answer_args+=(--embed-url "$given_embed_url"); fi
+  if [[ -n $given_embed_model ]]; then answer_args+=(--embed-model "$given_embed_model"); fi
   quiet docker run --rm --user "$(id -u):$(id -g)" -v "$stage:/settings" "$image" setup --project "$project" "${source_args[@]}" "${answer_args[@]}" --output /settings/profile.json
   mv -- "$stage/profile.json" "$profile"
 fi
-# The same address and model name as core/src/setup.rs writes into new profiles.
+# The same addresses and model names as core/src/setup.rs writes into new profiles.
 embed_url=http://embedder:8080 embed_model=embeddinggemma-2-BF16@6ea3e3a
+if [[ -n $given_embed_url ]]; then
+  embed_url=$given_embed_url embed_model=${given_embed_model:-embeddinggemma-2}
+  semantic_note="uses the embedding server at $embed_url"
+fi
 if [[ -n $given_semantic && $existed == true ]]; then
   if [[ $given_semantic == on ]]; then
     if jq -e '.services.library.environment | has("LIBRARY_DB_URL") or has("LIBRARY_DB_URL_FILE")' "$profile" >/dev/null; then
       echo '--semantic on needs the SQLite database' >&2; exit 2
     fi
-    jq --arg url "$embed_url" --arg model "$embed_model" \
+    jq --arg url "$embed_url" --arg model "$embed_model" --argjson own "$([[ -z $given_embed_url ]] && echo true || echo false)" \
       '(.services.library, .services.room, .services.librarian) |= (.environment.LIBRARY_EMBED_URL = $url
-        | .environment.LIBRARY_EMBED_MODEL = $model) | .services.embedder = {restart: (.services.room.restart // "unless-stopped")}' \
+        | .environment.LIBRARY_EMBED_MODEL = $model)
+        | if $own then .services.embedder = {restart: (.services.room.restart // "unless-stopped")} else del(.services.embedder) end' \
       "$profile" >"$profile.next"
   else
     jq 'del(.services[].environment.LIBRARY_EMBED_URL, .services[].environment.LIBRARY_EMBED_MODEL, .services.embedder)' \
@@ -295,7 +322,7 @@ export LIBRARY_IMAGE="$image"
 compose=(docker compose -p "$project" -f "$base" -f "$profile")
 
 begin room "Starting the room service"
-if [[ $semantic == on ]]; then
+if [[ $semantic == on ]] && jq -e '.services.embedder' "$profile" >/dev/null; then
   # The model file is fetched once at a pinned revision and checked before the server uses it.
   model_url=https://huggingface.co/ggml-org/embeddinggemma-2-GGUF/resolve/6ea3e3a309d12a4779cfda98b8c19800d2d5da71/embeddinggemma-2-BF16.gguf
   model_sha=68bae29d62fb8c7d23e98d21fd4662753ddd636e6b62b8a70dfe059a9844f216
@@ -305,7 +332,8 @@ if [[ $semantic == on ]]; then
     curl -sSfL --retry 3 -o "$f.part" "$1" && echo "$2  $f.part" | sha256sum -c --quiet - && mv "$f.part" "$f"
   ' fetch "$model_url" "$model_sha"
   quiet "${compose[@]}" --profile semantic up -d --no-build --wait embedder
-elif [[ $given_semantic == off ]]; then
+elif [[ -n $given_semantic ]]; then
+  # Turned off, or moved to an embedding server elsewhere: the embedder service is not needed.
   quiet "${compose[@]}" --profile semantic rm --stop --force embedder
 fi
 quiet "${compose[@]}" up -d --no-build --wait room

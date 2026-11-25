@@ -7,6 +7,9 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `setup` and `install-project` accept `--embed-url http://HOST:PORT` (and `--embed-model NAME`) to use an
+  embedding server that already runs instead of starting the `embedder` service. `install-project --image IMAGE`
+  uses an image built on another machine and loaded with `docker load`, so a small server does not compile.
 - Semantic search for SQLite installations. The librarian embeds changed documents through a local embedding
   server (`LIBRARY_EMBED_URL`, `LIBRARY_EMBED_MODEL`) and stores the vectors in the database; the search room fuses
   word and vector rankings with reciprocal rank fusion. Results carry `engine` and `semantic.status`; a server
