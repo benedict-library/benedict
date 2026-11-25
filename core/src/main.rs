@@ -1,5 +1,6 @@
 mod backup;
 mod catalog;
+mod embed;
 mod evaluation;
 mod files;
 mod import;
@@ -14,6 +15,7 @@ mod rooms;
 mod setup;
 mod search_room;
 mod shelf;
+mod vectors;
 mod web_source;
 mod wizard;
 mod work;
