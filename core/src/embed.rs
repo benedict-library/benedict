@@ -10,7 +10,9 @@ type Result<T> = std::result::Result<T, String>;
 
 /// The instruction the model card gives for a search query.
 const QUERY: &str = "task: search result | query: ";
-/// Connecting to a server on the same host takes milliseconds; a longer wait means it is down.
+/// Connecting to a server on the same host takes milliseconds; a longer wait means it is down. A batch
+/// request may wait as long as its own wait: a virtual machine's network can stall a connection for
+/// seconds under load (seen after a few hundred requests in a row) while the server is healthy.
 const CONNECT: Duration = Duration::from_secs(2);
 /// A query took about 50 ms on two cores without a GPU; two seconds leaves room for a busy server.
 pub(crate) const QUERY_WAIT: Duration = Duration::from_secs(2);
@@ -49,8 +51,13 @@ pub(crate) fn embed(url: &str, texts: &[String], wait: Duration) -> Result<Vec<V
         .map_err(|e| format!("embedding server {host}: {e}"))?
         .next()
         .ok_or_else(|| format!("embedding server {host}: no address"))?;
-    let mut stream = TcpStream::connect_timeout(&address, CONNECT)
-        .map_err(|e| format!("embedding server {host}: {e}"))?;
+    let io = |e: std::io::Error| match e.kind() {
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
+            format!("embedding server {host}: {CUT} {:.1} s", wait.as_secs_f64())
+        }
+        _ => format!("embedding server {host}: {e}"),
+    };
+    let mut stream = TcpStream::connect_timeout(&address, wait.max(CONNECT)).map_err(io)?;
     stream.set_read_timeout(Some(wait)).map_err(|e| e.to_string())?;
     stream.set_write_timeout(Some(wait)).map_err(|e| e.to_string())?;
     let body = json!({"input": texts}).to_string();
@@ -58,12 +65,6 @@ pub(crate) fn embed(url: &str, texts: &[String], wait: Duration) -> Result<Vec<V
         "POST /v1/embeddings HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
-    let io = |e: std::io::Error| match e.kind() {
-        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
-            format!("embedding server {host}: {CUT} {:.1} s", wait.as_secs_f64())
-        }
-        _ => format!("embedding server {host}: {e}"),
-    };
     stream.write_all(request.as_bytes()).map_err(io)?;
     let mut response = Vec::new();
     stream.read_to_end(&mut response).map_err(io)?;
