@@ -10,7 +10,7 @@ use rusqlite::params;
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -21,6 +21,92 @@ const BATCH: usize = 16;
 /// Parts per librarian cycle: about 0.5 s each on two cores is under 20 minutes a day; the rest
 /// waits for the next cycle and search uses words for those documents meanwhile.
 const PER_CYCLE: usize = 2_000;
+/// Seconds per part on two cores without a GPU (16 parts in about 8 s): the prediction on a machine
+/// that has no record of its own yet.
+const SEED_PACE: f64 = 0.5;
+/// Records kept per library. The slowest of them sets the wait; older ones age out, so a machine or
+/// server that becomes faster is followed.
+const PACE_RECORDS: usize = 50;
+/// With fewer records than this the wait is widened further: the first records on a shared four-core
+/// virtual machine were more than seven times the seed (3.7 s per part and more).
+const FEW_RECORDS: usize = 5;
+const FEW_WIDEN: f64 = 8.0;
+
+/// How long one request of `parts` parts may take. There is no fixed limit: the wait is the
+/// predicted time (median seconds per part in the records, or the seed) times a multiplier, which is
+/// twice the largest actual÷predicted ratio in the records, so no recorded request would have been
+/// cut, and wider while there are few records. A cut request is recorded at the wait it had, a lower
+/// bound of its time, so the next wait is longer.
+fn wait_for(parts: usize, records: &[f64]) -> Duration {
+    let mut sorted = records.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let predicted = sorted.get(sorted.len() / 2).copied().unwrap_or(SEED_PACE).max(f64::MIN_POSITIVE);
+    let ratio = sorted.last().map_or(1.0, |slowest| (slowest / predicted).max(1.0));
+    let widen = if records.len() < FEW_RECORDS { FEW_WIDEN } else { 1.0 };
+    Duration::from_secs_f64(parts.max(1) as f64 * predicted * 2.0 * ratio * widen)
+}
+
+fn paces(db: &rusqlite::Connection, project: &str, key: &str) -> Result<Vec<f64>> {
+    let mut stmt = db
+        .prepare("SELECT seconds_per_part FROM benedict_embed_pace WHERE project=?1 AND library=?2 ORDER BY seq")
+        .map_err(sql_error)?;
+    stmt.query_map(params![project, key], |r| r.get(0))
+        .map_err(sql_error)?
+        .collect::<rusqlite::Result<_>>()
+        .map_err(sql_error)
+}
+
+fn record_pace(db: &rusqlite::Connection, project: &str, key: &str, records: &mut Vec<f64>, pace: f64, cut: bool) -> Result<()> {
+    let at = Utc::now().to_rfc3339_opts(SecondsFormat::Micros, false);
+    db.execute(
+        "INSERT INTO benedict_embed_pace (project, library, seq, at, seconds_per_part, cut) VALUES (?1,?2,
+        (SELECT COALESCE(MAX(seq), 0) + 1 FROM benedict_embed_pace WHERE project=?1 AND library=?2),?3,?4,?5)",
+        params![project, key, at, pace, cut],
+    )
+    .map_err(sql_error)?;
+    db.execute(
+        "DELETE FROM benedict_embed_pace WHERE project=?1 AND library=?2 AND seq NOT IN
+        (SELECT seq FROM benedict_embed_pace WHERE project=?1 AND library=?2 ORDER BY seq DESC LIMIT ?3)",
+        params![project, key, PACE_RECORDS as i64],
+    )
+    .map_err(sql_error)?;
+    records.push(pace);
+    if records.len() > PACE_RECORDS {
+        records.remove(0);
+    }
+    Ok(())
+}
+
+/// One request, and one more with the longer wait when the first was cut. A server that does not
+/// answer the second either is left to the next cycle, which starts from the longer records, so a
+/// slow server is waited on long enough and one that never answers is not waited on without end.
+fn embed_batch(
+    db: &rusqlite::Connection,
+    (url, project, key): (&str, &str, &str),
+    batch: &[String],
+    records: &mut Vec<f64>,
+    cuts: &mut usize,
+) -> Result<std::result::Result<Vec<Vec<f32>>, String>> {
+    let parts = batch.len().max(1) as f64;
+    let mut last = String::new();
+    for _ in 0..2 {
+        let wait = wait_for(batch.len(), records);
+        let started = Instant::now();
+        match embed::embed(url, batch, wait) {
+            Ok(v) => {
+                record_pace(db, project, key, records, started.elapsed().as_secs_f64() / parts, false)?;
+                return Ok(Ok(v));
+            }
+            Err(e) if embed::was_cut(&e) => {
+                record_pace(db, project, key, records, wait.as_secs_f64() / parts, true)?;
+                *cuts += 1;
+                last = e;
+            }
+            Err(e) => return Ok(Err(e)),
+        }
+    }
+    Ok(Err(last))
+}
 
 /// The librarian's vector step. Its status is `not_configured`, `ok`, `partial` (more documents
 /// wait for the next cycle) or `failed` (the server could not be reached; the cycle goes on).
@@ -104,6 +190,8 @@ fn run(config: &Path, key: &str) -> Result<Value> {
         .iter()
         .filter(|(p, _, h)| have.get(p) != Some(h))
         .collect();
+    let mut records = paces(&db, &project, key)?;
+    let mut cuts = 0usize;
     let mut dim = 0usize;
     let (mut documents, mut done, mut skipped) = (0usize, 0usize, 0usize);
     let mut failure = None;
@@ -128,7 +216,7 @@ fn run(config: &Path, key: &str) -> Result<Value> {
         let texts: Vec<String> = parts(&text).iter().map(|p| embed::document_text(title, p)).collect();
         let mut vectors = Vec::with_capacity(texts.len());
         for batch in texts.chunks(BATCH) {
-            match embed::embed(&url, batch, embed::BATCH_WAIT) {
+            match embed_batch(&db, (&url, &project, key), batch, &mut records, &mut cuts)? {
                 Ok(v) => vectors.extend(v),
                 Err(e) => {
                     failure = Some(e);
@@ -191,6 +279,9 @@ fn run(config: &Path, key: &str) -> Result<Value> {
     if skipped > 0 {
         step["unreadable"] = json!(skipped);
     }
+    if cuts > 0 {
+        step["cut"] = json!(cuts);
+    }
     if let Some(e) = failure {
         step["error"] = json!(e);
     }
@@ -199,6 +290,33 @@ fn run(config: &Path, key: &str) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn the_wait_follows_the_records_and_has_no_fixed_limit() {
+        // No records: the seed, widened for a machine not yet measured.
+        assert_eq!(wait_for(16, &[]), Duration::from_secs_f64(16.0 * 0.5 * 2.0 * 8.0));
+        // Enough records: twice the slowest recorded pace, whatever its size.
+        let records = [1.0, 1.0, 1.0, 1.0, 4.0];
+        assert_eq!(wait_for(16, &records), Duration::from_secs_f64(16.0 * 4.0 * 2.0));
+        let slow = [30.0; 5];
+        assert!(wait_for(16, &slow) > Duration::from_secs(900));
+    }
+
+    #[test]
+    fn a_cut_is_kept_as_a_lower_bound_and_old_records_age_out() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(VECTOR_SCHEMA).unwrap();
+        let mut records = Vec::new();
+        record_pace(&db, "p", "main", &mut records, 2.0, true).unwrap();
+        assert!(wait_for(16, &records) >= Duration::from_secs_f64(16.0 * 2.0 * 2.0));
+        for _ in 0..PACE_RECORDS + 10 {
+            record_pace(&db, "p", "main", &mut records, 0.5, false).unwrap();
+        }
+        assert_eq!(paces(&db, "p", "main").unwrap().len(), PACE_RECORDS);
+        assert_eq!(records.len(), PACE_RECORDS);
+    }
+
     #[test]
     fn documents_split_into_parts_of_a_thousand_characters() {
         assert_eq!(super::parts(""), vec![String::new()]);

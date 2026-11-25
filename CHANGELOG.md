@@ -5,6 +5,14 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- An embedding request from the librarian no longer has a fixed 60-second limit, which cut every batch on a slow
+  machine (16 parts took over 60 s on a shared four-core virtual machine) so documents never got vectors. The wait is
+  now predicted from the library's own records (`benedict_embed_pace`): twice the slowest recorded time per part,
+  wider while there are few records. A cut request is recorded as a lower bound and sent once more with the longer
+  wait; the vector step reports `cut`.
+
 ### Added
 
 - `install-project` records the image that indexed a project in `.benedict/indexed-image`. A later run with the
