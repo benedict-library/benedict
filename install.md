@@ -39,14 +39,15 @@ The installer prints one line per step and takes care of these choices:
 
 | Choice | Default | What the installer checks |
 | --- | --- | --- |
-| Memory limit | From the wiki size (512 MiB for small wikis, 2 GiB for about 20,000 pages, 3 GiB for about 40,000), at most two thirds of Docker's memory | If initial indexing runs out of memory, it doubles the limit and tries again |
+| Memory limit | 1 GiB per container up to about 50,000 pages, 1 GiB more for each further 50,000, at most two thirds of Docker's memory | If initial indexing runs out of memory, it doubles the limit and tries again |
 | Wiki access | — | Writes a test file as UID 10001, the account the library runs as |
 | Database | SQLite in the project's data volume | — |
 | Shelf | None | — |
 | Librarian | Started: rebuilds the index once a day | — |
 | After a reboot | The library starts again by itself | — |
+| Semantic search | On when a 2 GiB embedding server fits beside the library in two thirds of Docker's memory; off with PostgreSQL | Downloads the embedding model once (558 MB) and checks its SHA-256. The choices and their costs: [docs/embedding.md](docs/embedding.md) |
 
-Pass an option only if the user asked for something else: `--memory SIZE`, `--database postgres --database-secret-file FILE`, `--shelf DIR`, `--autostart off`, `--librarian off`. If you want to relay progress yourself, add `--progress json`: standard output then carries one JSON event per step (`step`, `done`, `error` with a `reason`).
+Pass an option only if the user asked for something else: `--memory SIZE`, `--database postgres --database-secret-file FILE`, `--shelf DIR`, `--autostart off`, `--librarian off`, `--semantic on|off`, `--embed-url http://HOST:PORT` (an embedding server that already runs, reachable from the containers; no embedder service is started). On macOS, Docker runs containers in a virtual machine without the GPU, so the embedder container is slow for wikis of thousands of pages: when the summary shows semantic search on with the embedder container, tell the user that [docs/embedding.md](docs/embedding.md) explains turning it off or running the server on the host, and let them choose. If you want to relay progress yourself, add `--progress json`: standard output then carries one JSON event per step (`step`, `done`, `error` with a `reason`).
 
 ## 4. If the installer stops
 
@@ -57,11 +58,11 @@ It prints the step, the reason and the log path (`PROJECT/.benedict/install.log`
 - **The bundled skill page was edited.** An upgrade replaces `entities/skill_benedict-library.md` when it is the page an earlier version wrote. If someone changed it, the installer stops. Ask the user before moving their version to another name (for example `entities/skill_benedict-library.local.md`), then run the installer again.
 - **Anything else.** Show the reason line and the last lines of the log. Do not change files or permissions without the user's agreement.
 
-To retry, run the installer again with the same options. Once step 3 has written `PROJECT/.benedict/profile.json`, `bin/install-project PROJECT` with no options also retries with the same choices. To change a choice after that, choose a new project folder.
+To retry, run the installer again with the same options. Once step 3 has written `PROJECT/.benedict/profile.json`, `bin/install-project PROJECT` with no options also retries with the same choices. Semantic search can be turned on or off later with `bin/install-project --semantic on|off PROJECT`; a run with the image that last indexed the project keeps the index instead of indexing the wiki again. To change another choice after that, choose a new project folder.
 
 ## 5. Show the summary
 
-The summary lists where the library started from, the number of indexed documents, the memory limit and why, the database, the librarian and what happens after a reboot, with the options that change each of them. Show it to the user as it is. Then run `PROJECT/.benedict/library room ping` and report the result.
+When the room service starts, the search room loads the index into memory (about 12 seconds for 31,000 documents); a search in that time fails with `still loading the index` and works when repeated. The summary lists where the library started from, the number of indexed documents, the memory limit and why, the database, the librarian and what happens after a reboot, with the options that change each of them. Show it to the user as it is. Then run `PROJECT/.benedict/library room ping` and report the result.
 
 ## Upgrading an installed library
 
@@ -74,7 +75,9 @@ git pull
 bin/install-project PROJECT
 ```
 
-The installer builds the new image, starts the room and the librarian again from it and indexes the wiki again. The profile, the wiki, the shelf and the data volume stay as they are, so the choices made at installation are kept. Do not pass `--start` or `--wiki`. If the librarian was turned off at installation, pass `--librarian off` again; without it the installer starts the librarian.
+The installer builds the new image, starts the room and the librarian again from it and indexes the wiki again when the image changed (it records the image in `PROJECT/.benedict/indexed-image`). The profile, the wiki, the shelf and the data volume stay as they are, so the choices made at installation are kept. Do not pass `--start` or `--wiki`. If the librarian was turned off at installation, pass `--librarian off` again; without it the installer starts the librarian.
+
+On a small server, build the image on another machine from the same commit (`docker build -t benedict-library .`), move it to the server with `docker save` and `docker load`, and run `bin/install-project --image benedict-library PROJECT` there; the server then does not compile.
 
 Do not rebuild or restart the containers with `docker compose` yourself: that can leave the librarian on the old version. If the installer stops, follow step 4. Afterwards do step 5, and read the [changelog](CHANGELOG.md) for anything a version asks you to do by hand.
 

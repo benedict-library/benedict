@@ -5,8 +5,8 @@ use std::fs;
 
 use std::path::{Component, Path};
 
-/// The memory answer "default" in the setup questions (wizard: 512MiB로 시작하기).
-const DEFAULT_MEMORY: &str = "512m";
+/// The memory answer "default" in the setup questions (wizard: 1GiB로 시작하기).
+const DEFAULT_MEMORY: &str = "1g";
 
 fn options(args: &[String]) -> Result<BTreeMap<&str, &str>, String> {
     let mut values = BTreeMap::new();
@@ -23,6 +23,9 @@ fn options(args: &[String]) -> Result<BTreeMap<&str, &str>, String> {
                 | "--shelf"
                 | "--autostart"
                 | "--transcript-days"
+                | "--semantic"
+                | "--embed-url"
+                | "--embed-model"
                 | "--output"
                 | "--answers"
         ) || pair.len() != 2
@@ -128,7 +131,7 @@ fn apply_answers(
     opts.insert("--database", db);
     match selected("memory")? {
         "default"
-            if memory_bytes(opts.get("--memory").copied().unwrap_or("512m"))?
+            if memory_bytes(opts.get("--memory").copied().unwrap_or(DEFAULT_MEMORY))?
                 == memory_bytes(DEFAULT_MEMORY)? =>
         {
             opts.insert("--memory", DEFAULT_MEMORY);
@@ -216,7 +219,7 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
         .get("--output")
         .ok_or("missing --output FILE")?
         .to_string();
-    let memory = memory_bytes(opts.get("--memory").copied().unwrap_or("512m"))?;
+    let memory = memory_bytes(opts.get("--memory").copied().unwrap_or(DEFAULT_MEMORY))?;
     // The example start keeps its one line and takes the recommended answer.
     let restart = match opts.get("--autostart").copied().unwrap_or("on") {
         "on" => "unless-stopped",
@@ -227,7 +230,32 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
     if transcripts != "keep" && !transcripts.parse::<u64>().is_ok_and(|d| d > 0) {
         return Err("--transcript-days must be keep or a number of days".into());
     }
+    // An embedding server that already runs elsewhere replaces the embedder service.
+    let external = opts.get("--embed-url").copied();
+    if external.is_some_and(|url| !url.starts_with("http://")) {
+        return Err("--embed-url must be an http:// address".into());
+    }
+    if external.is_none() && opts.contains_key("--embed-model") {
+        return Err("--embed-model names the model of --embed-url".into());
+    }
+    let semantic = match (opts.get("--semantic").copied(), external) {
+        (Some("on") | None, Some(_)) | (Some("on"), None) => true,
+        (Some("off") | None, None) => false,
+        (Some("off"), Some(_)) => return Err("--embed-url needs semantic search on".into()),
+        _ => return Err("--semantic must be on or off".into()),
+    };
+    if semantic && opts.get("--database").copied() == Some("postgres") {
+        return Err("--semantic on needs the SQLite database".into());
+    }
     let mut env = json!({"LIBRARY_PROJECT":project, "LIBRARY_DB":"/data/library.sqlite3", "LIBRARY_CONFIG":"/data/library.json", "LIBRARY_ROOM_SOCKET":"/data/rooms.sock", "LIBRARY_TRANSCRIPT_DAYS":transcripts});
+    if semantic {
+        // The embedder service of compose.yaml; the model name changes when its pinned file does.
+        env["LIBRARY_EMBED_URL"] = json!(external.unwrap_or(EMBED_URL));
+        env["LIBRARY_EMBED_MODEL"] = json!(match external {
+            Some(_) => opts.get("--embed-model").copied().unwrap_or(EXTERNAL_MODEL),
+            None => EMBED_MODEL,
+        });
+    }
     let secret_file = opts
         .get("--database-secret-file")
         .map(|s| host_path(s))
@@ -287,9 +315,6 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
         "room":service,"gate":service}});
     if example {
         profile["services"]["library"]["environment"]["LIBRARY_START"] = "example".into();
-    } else {
-        // The bundled golden questions fit only the example; other libraries grow their own.
-        profile["services"]["librarian"]["environment"]["LIBRARY_GOLDEN"] = "".into();
     }
     // Only the long-running services restart; the library service runs one command and exits.
     for svc in ["room", "librarian", "gate"] {
@@ -297,6 +322,9 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
     }
     if empty_shelf {
         profile["volumes"] = json!({"empty_shelf":{}});
+    }
+    if semantic && external.is_none() {
+        profile["services"]["embedder"] = json!({"restart": restart});
     }
     if let Some(file) = secret_file {
         profile["secrets"] =
@@ -309,6 +337,12 @@ fn overlay(args: &[String]) -> Result<(String, Value), String> {
     }
     Ok((output, profile))
 }
+
+/// The embedding server compose.yaml starts for semantic search, and the model file it serves.
+const EMBED_URL: &str = "http://embedder:8080";
+const EMBED_MODEL: &str = "embeddinggemma-2-BF16@6ea3e3a";
+/// The model name recorded for vectors from an embedding server set with --embed-url.
+const EXTERNAL_MODEL: &str = "embeddinggemma-2";
 
 const COMMON_SKILL: &[u8] = include_bytes!("../../docs/skills/benedict-library/SKILL.md");
 // SHA-256 of the bundled skill page as earlier releases wrote it. An upgrade replaces
@@ -345,6 +379,9 @@ fn install_common_skill(wiki: &Path) -> Result<(), String> {
         Err(e) => Err(e.to_string()),
     }
 }
+
+/// The golden questions that fit the bundled example library.
+const EXAMPLE_GOLDEN: &str = "/app/examples/golden.jsonl";
 
 fn activate(data: &Path) -> Result<(), String> {
     let lock_path = data.join(".setup.lock");
@@ -426,6 +463,18 @@ fn activate(data: &Path) -> Result<(), String> {
     if let Some(reg) = upgrade {
         crate::files::atomic(&registry, reg.to_string().as_bytes(), false)?;
     }
+    if std::env::var("LIBRARY_START").as_deref() == Ok("example") {
+        // Only the example start gets the bundled golden questions; other libraries grow their own
+        // from filed answers. An existing file is kept.
+        let golden = data.join("golden");
+        crate::files::no_link(&golden)?;
+        fs::create_dir_all(&golden).map_err(|e| e.to_string())?;
+        let target = golden.join("main.jsonl");
+        if !target.exists() {
+            let bundled = fs::read(EXAMPLE_GOLDEN).map_err(|e| format!("{EXAMPLE_GOLDEN}: {e}"))?;
+            crate::files::atomic(&target, &bundled, true)?;
+        }
+    }
     install_common_skill(&wiki)?;
     let indexed = std::process::Command::new(std::env::current_exe().map_err(|e| e.to_string())?)
         .arg("index")
@@ -434,10 +483,7 @@ fn activate(data: &Path) -> Result<(), String> {
         .output()
         .map_err(|e| format!("could not start indexer: {e}"))?;
     if !indexed.status.success() {
-        return Err(format!(
-            "initial wiki indexing failed: {}",
-            String::from_utf8_lossy(&indexed.stderr).trim()
-        ));
+        return Err(indexing_failure(indexed.status, &indexed.stderr));
     }
     let index: Value = serde_json::from_slice(&indexed.stdout)
         .map_err(|e| format!("invalid index result: {e}"))?;
@@ -448,24 +494,37 @@ fn activate(data: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Why the first index failed. A process stopped by the container's memory limit gets signal 9 and
+/// prints nothing, so that case names the setting to raise instead of giving an empty reason.
+fn indexing_failure(status: std::process::ExitStatus, stderr: &[u8]) -> String {
+    #[cfg(unix)]
+    let signal = std::os::unix::process::ExitStatusExt::signal(&status);
+    #[cfg(not(unix))]
+    let signal: Option<i32> = None;
+    let said = String::from_utf8_lossy(stderr).trim().to_string();
+    let reason = if signal == Some(9) {
+        "indexer killed (signal 9), most likely by the memory limit; raise it with --memory SIZE".to_string()
+    } else if said.is_empty() {
+        format!("indexer stopped ({status}) and printed no error")
+    } else {
+        said
+    };
+    format!("initial wiki indexing failed: {reason}")
+}
+
 /// Memory limit in MiB for a wiki of this size, and whether it fits in two thirds of Docker's memory.
-/// The steps follow measured first installs: 2,285 pages (35 MB) indexed at 1 GiB, 21,706 pages
-/// (135 MB) at 2 GiB, and 42,000 pages (540 MB) were killed at 512 MiB and indexed at 3 GiB.
-/// Beyond that, each further 20,000 pages adds 1 GiB. The installer retries with a larger limit if
-/// initial indexing still runs out of memory.
+/// Indexing reads one document at a time and the search room holds no document text. Measured: a
+/// wiki of 42,000 files (540 MB, 31,162 indexed documents) indexed within 1 GiB at a peak of 0.82 GB
+/// with the page cache, and its search room held 0.2 GB. Beyond 50,000 pages or 700 MB, each further
+/// 50,000 pages adds 1 GiB. The installer retries with a larger limit if initial indexing still runs
+/// out of memory.
 fn recommend_memory(pages: u64, bytes: u64, docker: u64) -> (u64, bool) {
     const MIB: u64 = 1024 * 1024;
     let mb = bytes / MIB;
-    let need = if pages <= 1_000 && mb <= 20 {
-        512
-    } else if pages <= 5_000 && mb <= 100 {
+    let need = if pages <= 50_000 && mb <= 700 {
         1024
-    } else if pages <= 25_000 && mb <= 300 {
-        2048
-    } else if pages <= 50_000 && mb <= 700 {
-        3072
     } else {
-        3072 + 1024 * pages.saturating_sub(50_000).div_ceil(20_000).max(1)
+        1024 + 1024 * pages.saturating_sub(50_000).div_ceil(50_000).max(1)
     };
     let cap = docker / MIB / 3 * 2;
     if docker == 0 || need <= cap {
@@ -505,7 +564,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     }
     if args == ["--help"] || args.is_empty() {
         println!(
-            "setup --project NAME --output FILE [--memory 512m] [--database sqlite|postgres] [--database-secret-file /host/secret] [--answers INTERVIEW.json] [--start empty|example] [--wiki /host/wiki] [--shelf /host/shelf] [--autostart on|off]\nsetup --activate\nsetup --recommend-memory --pages N --bytes N --docker-memory N"
+            "setup --project NAME --output FILE [--memory 1g] [--database sqlite|postgres] [--database-secret-file /host/secret] [--answers INTERVIEW.json] [--start empty|example] [--wiki /host/wiki] [--shelf /host/shelf] [--autostart on|off] [--semantic on|off] [--embed-url http://HOST:PORT [--embed-model NAME]]\nsetup --activate\nsetup --recommend-memory --pages N --bytes N --docker-memory N"
         );
         return Ok(());
     }
@@ -539,16 +598,37 @@ mod tests {
         s.iter().map(|s| s.to_string()).collect()
     }
     #[test]
+    fn a_killed_indexer_names_the_memory_limit() {
+        let run = |script: &str| {
+            std::process::Command::new("sh")
+                .args(["-c", script])
+                .status()
+                .unwrap()
+        };
+        let killed = indexing_failure(run("kill -9 $$"), b"");
+        assert!(killed.starts_with("initial wiki indexing failed: "), "{killed}");
+        assert!(killed.contains("signal 9"), "{killed}");
+        assert!(killed.contains("--memory"), "{killed}");
+        // The installer reports the last 200 characters of its log line, which wraps this in {"error":...}.
+        assert!(killed.len() < 180, "{} characters: {killed}", killed.len());
+        let silent = indexing_failure(run("exit 3"), b"");
+        assert!(silent.contains("printed no error"), "{silent}");
+        let said = indexing_failure(run("exit 3"), b"cannot read entities/x.md\n");
+        assert_eq!(said, "initial wiki indexing failed: cannot read entities/x.md");
+    }
+
+    #[test]
     fn recommends_memory_from_measured_wiki_sizes() {
         const MIB: u64 = 1024 * 1024;
         let docker = 32 * 1024 * MIB;
-        assert_eq!(recommend_memory(5, MIB, docker), (512, true));
+        assert_eq!(recommend_memory(5, MIB, docker), (1024, true));
         assert_eq!(recommend_memory(2_285, 35 * MIB, docker), (1024, true));
-        assert_eq!(recommend_memory(21_706, 135 * MIB, docker), (2048, true));
-        assert_eq!(recommend_memory(42_064, 540 * MIB, docker), (3072, true));
-        assert_eq!(recommend_memory(90_000, 900 * MIB, docker), (5120, true));
-        // A Docker VM of 3 GiB leaves 2 GiB for the library.
-        assert_eq!(recommend_memory(42_064, 540 * MIB, 3 * 1024 * MIB), (2048, false));
+        assert_eq!(recommend_memory(21_706, 135 * MIB, docker), (1024, true));
+        assert_eq!(recommend_memory(42_064, 540 * MIB, docker), (1024, true));
+        assert_eq!(recommend_memory(90_000, 900 * MIB, docker), (2048, true));
+        assert_eq!(recommend_memory(160_000, 2_000 * MIB, docker), (4096, true));
+        // A Docker VM of 1.5 GiB leaves 1 GiB for the library.
+        assert_eq!(recommend_memory(90_000, 900 * MIB, 1536 * MIB), (1024, false));
         assert!(recommend(&args(&["--pages", "x"])).is_err());
     }
 
@@ -583,11 +663,6 @@ mod tests {
             let mut same = v["services"][other].clone();
             let restart = same.as_object_mut().unwrap().remove("restart");
             assert_eq!(restart, Some(json!("unless-stopped")));
-            if other == "librarian" {
-                // Only the example start uses the bundled golden questions.
-                let golden = same["environment"].as_object_mut().unwrap().remove("LIBRARY_GOLDEN");
-                assert_eq!(golden, Some(json!("")));
-            }
             assert_eq!(svc, &same);
         }
     }
@@ -798,7 +873,7 @@ mod tests {
         let mut none = wiki();
         apply_answers(&mut none, &answers("wiki", Some("none"))).unwrap();
         assert_eq!(none["--shelf"], "none");
-        assert_eq!(none["--memory"], "512m");
+        assert_eq!(none["--memory"], "1g");
         let mut conflict = BTreeMap::from([("--wiki", "/srv/wiki"), ("--shelf", "/srv/x")]);
         assert!(apply_answers(&mut conflict, &answers("wiki", Some("none"))).is_err());
         let mut example = BTreeMap::new();
@@ -832,6 +907,41 @@ mod tests {
         assert!(apply_answers(&mut conflict, &answers("off")).is_err());
     }
     #[test]
+    fn semantic_on_adds_the_embedder_and_its_address() {
+        let own = ["--wiki", "/srv/wiki", "--database", "sqlite", "--memory", "512m", "--shelf", "none", "--autostart", "on"];
+        let mut on = own.to_vec();
+        on.extend(["--semantic", "on"]);
+        let (_, v) = overlay(&base(&on)).unwrap();
+        for service in ["library", "room", "librarian"] {
+            assert_eq!(v["services"][service]["environment"]["LIBRARY_EMBED_URL"], EMBED_URL);
+            assert_eq!(v["services"][service]["environment"]["LIBRARY_EMBED_MODEL"], EMBED_MODEL);
+        }
+        assert_eq!(v["services"]["embedder"]["restart"], "unless-stopped");
+        let (_, v) = overlay(&base(&own)).unwrap();
+        assert!(v["services"].get("embedder").is_none());
+        assert!(v["services"]["room"]["environment"].get("LIBRARY_EMBED_URL").is_none());
+        let mut postgres = args(&["--project", "a", "--output", "x", "--wiki", "/srv/wiki"]);
+        postgres.extend(args(&["--memory", "512m", "--shelf", "none", "--autostart", "on"]));
+        postgres.extend(args(&["--database", "postgres", "--database-secret-file", "/secrets/db", "--semantic", "on"]));
+        assert!(overlay(&postgres).is_err());
+        // An embedding server that already runs elsewhere: its address, no embedder service.
+        let mut external = own.to_vec();
+        external.extend(["--embed-url", "http://embeddings.example:8080", "--embed-model", "eg2"]);
+        let (_, v) = overlay(&base(&external)).unwrap();
+        assert_eq!(v["services"]["room"]["environment"]["LIBRARY_EMBED_URL"], "http://embeddings.example:8080");
+        assert_eq!(v["services"]["librarian"]["environment"]["LIBRARY_EMBED_MODEL"], "eg2");
+        assert!(v["services"].get("embedder").is_none());
+        for wrong in [
+            &["--embed-url", "https://example.org"][..],
+            &["--embed-url", "http://x:1", "--semantic", "off"],
+            &["--embed-model", "eg2"],
+        ] {
+            let mut all = own.to_vec();
+            all.extend(wrong);
+            assert!(overlay(&base(&all)).is_err(), "{wrong:?}");
+        }
+    }
+    #[test]
     fn rejects_overlap_duplicates_and_invalid_values() {
         for extra in [
             &["--shelf", "/wiki/x", "--wiki", "/wiki"][..],
@@ -851,6 +961,7 @@ mod tests {
             &["--memory", "2m"],
             &["--memory", "1g", "--memory", "2g"],
             &["--start", "example", "--autostart", "maybe"],
+            &["--start", "example", "--semantic", "maybe"],
         ] {
             let mut all = args(&["--project", "a", "--output", "x"]);
             all.extend(args(extra));

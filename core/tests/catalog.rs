@@ -1,4 +1,5 @@
 //! New Docker-style installations must be able to finish a handoff with only Rust commands.
+mod common;
 use serde_json::Value;
 use std::{
     path::Path,
@@ -6,15 +7,18 @@ use std::{
 };
 use tempfile::tempdir;
 
-fn cli(home: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_benedict"))
-        .args(args)
+fn command(home: &Path) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_benedict"));
+    command
         .env_clear()
         .env("PATH", "/no-external-programs")
         .env("LIBRARY_CONFIG", home.join("library.json"))
         .env("LIBRARY_DB", home.join("records.sqlite"))
-        .output()
-        .unwrap()
+        .env("LIBRARY_ROOM_SOCKET", common::socket(home));
+    command
+}
+fn cli(home: &Path, args: &[&str]) -> Output {
+    command(home).args(args).output().unwrap()
 }
 fn ok(home: &Path, args: &[&str]) -> Value {
     let out = cli(home, args);
@@ -32,6 +36,7 @@ fn standalone_handoff_in_new_processes_without_python() {
     let home = home.path();
     let raw = "What was agreed? Keep the original instruction.";
     ok(home, &["init", "--demo"]);
+    let _room = common::Room::start(|| command(home));
     ok(home, &["add", "--key", "research"]);
     let found = ok(home, &["search", "--question", raw, "refund"]);
     assert_eq!(found["hits"][0]["path"], "entities/refund.md");
@@ -108,6 +113,7 @@ fn scoped_originals_are_searchable_readable_and_verifiable() {
     let dir = tempdir().unwrap();
     let home = dir.path();
     ok(home, &["init"]);
+    let _room = common::Room::start(|| command(home));
     ok(home, &["add", "--key", "private"]);
     let config = home.join("library.json");
     let mut registry: Value = serde_json::from_slice(&fs::read(&config).unwrap()).unwrap();

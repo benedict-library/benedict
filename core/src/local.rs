@@ -2,9 +2,10 @@
 use chrono::{SecondsFormat, Utc};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet};
+use crate::index_store::{self, IndexEntry, IndexState, IndexedDoc};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
-use std::io::Write;
+use std::time::Instant;
 use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -19,13 +20,13 @@ fn relative(path: &Path) -> bool {
     !path.is_absolute() && !path.components().any(|p| p == Component::ParentDir)
 }
 
-struct Registry {
-    path: PathBuf,
-    rows: Map<String, Value>,
+pub(crate) struct Registry {
+    pub(crate) path: PathBuf,
+    pub(crate) rows: Map<String, Value>,
 }
 
 impl Registry {
-    fn open(config: &Path) -> Result<Self> {
+    pub(crate) fn open(config: &Path) -> Result<Self> {
         let path = fs::canonicalize(config).map_err(|e| format!("{}: {e}", config.display()))?;
         let mut data = read_json(&path)?;
         let invalid = "registry requires version 1 and nonempty libraries object";
@@ -42,7 +43,7 @@ impl Registry {
     }
 
     // Room-backed registries and policy fields use the existing policy-aware implementation.
-    fn simple(&self) -> Result<bool> {
+    pub(crate) fn simple(&self) -> Result<bool> {
         for (key, row) in &self.rows {
             let obj = row
                 .as_object()
@@ -111,7 +112,7 @@ impl Registry {
         }
     }
 
-    fn root(&self, key: &str) -> Result<PathBuf> {
+    pub(crate) fn root(&self, key: &str) -> Result<PathBuf> {
         let row = self
             .rows
             .get(key)
@@ -131,7 +132,7 @@ impl Registry {
         Ok(root)
     }
 
-    fn shelf_root(&self, key: &str) -> Result<Option<PathBuf>> {
+    pub(crate) fn shelf_root(&self, key: &str) -> Result<Option<PathBuf>> {
         self.rows[key]
             .get("shelf_root")
             .map(|v| {
@@ -144,7 +145,8 @@ impl Registry {
             .transpose()
     }
 
-    fn index_path(&self, key: &str) -> PathBuf {
+    /// The JSON index file of earlier releases; its lock file still serializes indexing.
+    pub(crate) fn index_path(&self, key: &str) -> PathBuf {
         // Compatibility clients index wiki pages only. Keep their index separate
         // from a native index that holds shelf originals too.
         let kind = if self.rows[key].get("shelf_root").is_some() {
@@ -158,6 +160,17 @@ impl Registry {
             .unwrap()
             .join(".library-state")
             .join(format!("{:.16}-index.json", format!("{hash:x}")))
+    }
+
+    /// The wiki and shelf roots an index version is made for; the shelf root is empty without a shelf.
+    pub(crate) fn roots(&self, key: &str) -> Result<(String, String)> {
+        let root = self.root(key)?;
+        let root = root.to_str().ok_or("wiki_root is not UTF-8")?.to_owned();
+        let shelf = match self.shelf_root(key)? {
+            Some(path) => path.to_str().ok_or("shelf_root is not UTF-8")?.to_owned(),
+            None => String::new(),
+        };
+        Ok((root, shelf))
     }
 }
 
@@ -223,7 +236,7 @@ pub fn casefold(text: &str) -> String {
     folded
 }
 
-fn words(text: &str) -> impl Iterator<Item = String> {
+pub(crate) fn words(text: &str) -> impl Iterator<Item = String> {
     let alphabet = alphabet();
     let folded = casefold(text);
     let mut output = Vec::new();
@@ -247,7 +260,10 @@ fn normalize_newlines(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
-fn discover(root: &Path, dir: &Path, docs: &mut BTreeMap<String, String>) -> Result<()> {
+/// Receives each document as (path, text), one at a time.
+type Visit<'a> = dyn FnMut(String, String) -> Result<()> + 'a;
+
+fn discover(root: &Path, dir: &Path, seen: &mut HashSet<String>, visit: &mut Visit<'_>) -> Result<()> {
     if !dir.is_dir() {
         return Ok(());
     }
@@ -262,23 +278,21 @@ fn discover(root: &Path, dir: &Path, docs: &mut BTreeMap<String, String>) -> Res
         }
         let path = entry.path();
         if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
-            discover(root, &path, docs)?;
+            discover(root, &path, seen, visit)?;
         } else if path.extension().is_some_and(|e| e == "md") {
             let relative = path
                 .strip_prefix(root)
                 .unwrap()
                 .to_string_lossy()
                 .into_owned();
-            if relative != "log.md" && !docs.contains_key(&relative) {
+            if relative != "log.md" && !seen.contains(&relative) {
                 let Ok(target) = fs::canonicalize(&path) else {
                     continue;
                 };
                 if target.starts_with(root) && target.is_file() {
                     let bytes = fs::read(target).map_err(|e| e.to_string())?;
-                    docs.insert(
-                        relative,
-                        normalize_newlines(&String::from_utf8_lossy(&bytes)),
-                    );
+                    seen.insert(relative.clone());
+                    visit(relative, normalize_newlines(&String::from_utf8_lossy(&bytes)))?;
                 }
             }
         }
@@ -286,8 +300,9 @@ fn discover(root: &Path, dir: &Path, docs: &mut BTreeMap<String, String>) -> Res
     Ok(())
 }
 
-fn documents(reg: &Registry, key: &str, root: &Path) -> Result<BTreeMap<String, String>> {
-    let mut docs = BTreeMap::new();
+/// Each document of the library, wiki pages then shelf originals, read one at a time.
+fn each_document(reg: &Registry, key: &str, root: &Path, visit: &mut Visit<'_>) -> Result<()> {
+    let mut seen = HashSet::new();
     if let Some(dirs) = reg.rows[key]["dirs"].as_array().filter(|l| !l.is_empty()) {
         for dir in dirs.iter().filter_map(Value::as_str) {
             let dir = Path::new(dir);
@@ -295,16 +310,16 @@ fn documents(reg: &Registry, key: &str, root: &Path) -> Result<BTreeMap<String, 
                 .components()
                 .any(|c| matches!(c, Component::Normal(s) if s.to_string_lossy().starts_with('.')))
             {
-                discover(&root, &root.join(dir), &mut docs)?;
+                discover(root, &root.join(dir), &mut seen, visit)?;
             }
         }
     } else {
-        discover(&root, &root, &mut docs)?;
+        discover(root, root, &mut seen, visit)?;
     }
     if let Some(shelf) = reg.shelf_root(key)? {
-        crate::shelf::index(&shelf, &mut docs)?;
+        crate::shelf::each(&shelf, visit)?;
     }
-    Ok(docs)
+    Ok(())
 }
 
 /// Evaluation opens real wiki files, even if a document changed since the last index.
@@ -321,9 +336,12 @@ impl EvaluationCorpus {
             return Err("registry requires the policy-aware evaluator".into());
         }
         let key = registry.key(key)?.to_owned();
-        let paths = documents(&registry, &key, &registry.root(&key)?)?
-            .into_keys()
-            .collect();
+        let mut paths = Vec::new();
+        each_document(&registry, &key, &registry.root(&key)?, &mut |path, _| {
+            paths.push(path);
+            Ok(())
+        })?;
+        paths.sort();
         Ok(Self {
             registry,
             key,
@@ -338,47 +356,156 @@ impl EvaluationCorpus {
     }
 }
 
-/// The index record of the library's documents as they are now.
-fn fresh_record(reg: &Registry, key: &str, root: &Path) -> Result<Value> {
-    let docs = documents(reg, key, root)?;
-    let mut counts = BTreeMap::new();
-    let mut lengths = BTreeMap::new();
-    for (path, body) in &docs {
-        let mut counter = BTreeMap::new();
-        for word in words(body) {
-            *counter.entry(word).or_insert(0u64) += 1;
-        }
-        lengths.insert(path, counter.values().sum::<u64>());
-        counts.insert(path, counter);
+/// The catalog row, length and word counts of one document.
+fn indexed(path: String, text: &str, hash: String) -> IndexedDoc {
+    let mut counter = BTreeMap::new();
+    for word in words(text) {
+        *counter.entry(word).or_insert(0u64) += 1;
     }
-    let indexed_at = Utc::now().to_rfc3339_opts(SecondsFormat::Micros, false);
-    Ok(
-        json!({"version":1,"root":root,"shelf_root":reg.shelf_root(key)?,"indexed_at":indexed_at,"documents":docs,"counts":counts,"lengths":lengths}),
-    )
+    let title = text
+        .lines()
+        .find(|s| s.starts_with("# "))
+        .map_or(path.as_str(), |s| s.trim_start_matches(['#', ' ']))
+        .replace('\0', "");
+    IndexedDoc {
+        title,
+        summary: summary(text).replace('\0', ""),
+        hash,
+        length: counter.values().sum(),
+        terms: counter.into_iter().collect(),
+        path,
+    }
 }
 
+/// What a document is about: its front matter title and description, otherwise its first line.
+fn summary(text: &str) -> String {
+    let mut body = text;
+    let mut parts = Vec::new();
+    if let Some(rest) = text.strip_prefix("---\n")
+        && let Some(end) = rest.find("\n---")
+    {
+        for line in rest[..end].lines() {
+            for key in ["title:", "description:"] {
+                if let Some(value) = line.strip_prefix(key) {
+                    let value = value.trim().trim_matches(['"', '\'']).trim();
+                    if !value.is_empty() {
+                        parts.push(value);
+                    }
+                }
+            }
+        }
+        body = rest[end + 4..].split_once('\n').map_or("", |(_, after)| after);
+    }
+    let summary = if parts.is_empty() {
+        body.lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .unwrap_or("")
+            .to_owned()
+    } else {
+        parts.join(" — ")
+    };
+    summary.chars().take(300).collect()
+}
+
+/// Changed documents kept in memory while the library is read. Beyond this many (a large change),
+/// documents are written while they are read, as on a first index.
+const HELD: usize = 2_000;
+const MANY: &str = "more changed documents than are held";
+
+/// Index the library into the database. Only documents whose text changed are written again,
+/// documents that are gone are removed, and the new version is set in the same transaction.
+/// The documents are read before the transaction starts, so the room can record searches meanwhile.
 fn build_index(reg: &Registry, key: &str) -> Result<Value> {
-    use tempfile::NamedTempFile;
-    let path = reg.index_path(key);
-    let parent = path.parent().unwrap();
+    let started = Instant::now();
+    let lock_path = reg.index_path(key).with_extension("lock");
+    let parent = lock_path.parent().unwrap();
     crate::files::no_link(parent)?;
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    let lock_path = path.with_extension("lock");
     crate::files::no_link(&lock_path)?;
     let _lock = crate::files::lock(&lock_path)?;
     let root = reg.root(key)?;
-    let record = fresh_record(reg, key, &root)?;
-    let documents = record["documents"].as_object().map_or(0, Map::len);
-    let indexed_at = record["indexed_at"].clone();
-    let mut tmp = NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
-    serde_json::to_writer(&mut tmp, &record).map_err(|e| e.to_string())?;
-    tmp.flush()
-        .and_then(|_| tmp.as_file().sync_all())
-        .map_err(|e| e.to_string())?;
-    tmp.persist(path).map_err(|e| e.to_string())?;
-    Ok(
-        json!({"library":key,"documents":documents,"engine":"lexical-bm25","persistent":true,"indexed_at":indexed_at}),
-    )
+    let (root_text, shelf_text) = reg.roots(key)?;
+    let previous = index_store::state(key)?;
+    let reset = previous
+        .as_ref()
+        .is_none_or(|s| s.root != root_text || s.shelf_root != shelf_text);
+    let mut known = if reset {
+        HashMap::new()
+    } else {
+        index_store::hashes(key)?
+    };
+    let (mut documents, mut changed, mut removed) = (0u64, 0u64, 0u64);
+    let new_state = |documents| IndexState {
+        root: root_text.clone(),
+        shelf_root: shelf_text.clone(),
+        indexed_at: Utc::now().to_rfc3339_opts(SecondsFormat::Micros, false),
+        documents,
+        vectors_at: String::new(),
+    };
+    // Read every document first and keep only the changed ones.
+    let mut held = Vec::new();
+    let mut left = known.clone();
+    let read_first = !reset
+        && match each_document(reg, key, &root, &mut |path, text| {
+            documents += 1;
+            let hash = format!("{:x}", Sha256::digest(text.as_bytes()));
+            if left.remove(&path).as_deref() != Some(hash.as_str()) {
+                if held.len() == HELD {
+                    return Err(MANY.into());
+                }
+                held.push(indexed(path, &text, hash));
+            }
+            Ok(())
+        }) {
+            Ok(()) => true,
+            Err(e) if e == MANY => false,
+            Err(e) => return Err(e),
+        };
+    let written = if read_first {
+        changed = held.len() as u64;
+        removed = left.len() as u64;
+        if changed + removed == 0 {
+            None
+        } else {
+            index_store::write(key, false, &mut |sink| {
+                for doc in held.drain(..) {
+                    sink(IndexEntry::Document(doc))?;
+                }
+                for (path, _) in left.drain() {
+                    sink(IndexEntry::Removed(path))?;
+                }
+                Ok(Some(new_state(documents)))
+            })?
+        }
+    } else {
+        drop((held, left));
+        documents = 0;
+        index_store::write(key, reset, &mut |sink| {
+            each_document(reg, key, &root, &mut |path, text| {
+                documents += 1;
+                let hash = format!("{:x}", Sha256::digest(text.as_bytes()));
+                if known.remove(&path).as_deref() != Some(hash.as_str()) {
+                    changed += 1;
+                    sink(IndexEntry::Document(indexed(path, &text, hash)))?;
+                }
+                Ok(())
+            })?;
+            for (path, _) in known.drain() {
+                removed += 1;
+                sink(IndexEntry::Removed(path))?;
+            }
+            Ok((reset || changed > 0 || removed > 0).then(|| new_state(documents)))
+        })?
+    };
+    let state = match written {
+        Some(state) => state,
+        None => previous.ok_or("index state missing; rebuild index")?,
+    };
+    let (catalog, vocabulary) = index_store::counts(key)?;
+    Ok(json!({"library":key,"documents":state.documents,"engine":"lexical-bm25","persistent":true,
+        "indexed_at":state.indexed_at,"changed":changed,"removed":removed,"catalog":catalog,
+        "words":vocabulary,"seconds":(started.elapsed().as_secs_f64() * 1000.0).round() / 1000.0}))
 }
 
 pub fn index(config: &Path, key: &str) -> Result<Value> {
@@ -411,147 +538,35 @@ pub fn refresh(config: &Path, key: &str, path: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
-/// One library's hits from its prebuilt index. When that index is missing, damaged or made for other files, the
-/// library's documents are read now and ranked the same way; `fallback` says why, and `indexed_at` is null.
+/// One library's hits, from the search room that holds its index in memory. Without the room
+/// nothing is searched: reading the files here instead would hide that the room is not running.
 fn search_one(reg: &Registry, key: &str, query: &str, top: usize) -> Result<Value> {
-    let root = reg.root(key)?;
-    let words: BTreeSet<_> = words(query).collect();
-    if words.is_empty() {
+    if words(query).next().is_none() {
         return Err("query must contain a word".into());
     }
-    match stored_record(reg, key, &root).and_then(|record| rank(reg, key, &record, &words, top))
-    {
-        Ok(result) => Ok(result),
-        Err(reason) => {
-            let mut result = rank(reg, key, &fresh_record(reg, key, &root)?, &words, top)?;
-            result["indexed_at"] = Value::Null;
-            result["fallback"] = json!(format!("{reason}; searched the wiki files directly"));
-            Ok(result)
-        }
-    }
+    let socket =
+        crate::rooms::socket_path().ok_or("search room not running: set LIBRARY_ROOM_SOCKET")?;
+    crate::rooms::request(
+        &socket,
+        json!({"op":"search","project":crate::records::project()?,"config":reg.path,
+               "library":key,"query":query,"top":top}),
+    )
+    .map_err(|e| match e.strip_prefix(crate::rooms::NOT_RUNNING) {
+        Some(rest) => format!("search room not running{rest}"),
+        None => e,
+    })
 }
 
-fn stored_record(reg: &Registry, key: &str, root: &Path) -> Result<Value> {
-    let path = reg.index_path(key);
-    if !path.is_file() {
-        return Err("prebuilt index missing; run index or librarian before search".into());
-    }
-    let record = read_json(&path)?;
-    if record["shelf_root"] != json!(reg.shelf_root(key)?)
-        || record["version"] != 1
-        || record["root"] != root.to_str().ok_or("wiki_root is not UTF-8")?
-    {
-        return Err("index does not match selected library; rebuild index".into());
-    }
-    Ok(record)
-}
-
-fn rank(
-    reg: &Registry,
-    key: &str,
-    record: &Value,
-    words: &BTreeSet<String>,
-    top: usize,
-) -> Result<Value> {
-    let invalid = "invalid index; rebuild index";
-    let docs = record["documents"].as_object().ok_or(invalid)?;
-    let counts = record["counts"].as_object().ok_or(invalid)?;
-    let lengths = record["lengths"].as_object().ok_or(invalid)?;
-    if docs.len() != counts.len() || docs.len() != lengths.len() {
-        return Err(invalid.into());
-    }
-    let indexed_at = record["indexed_at"].as_str().ok_or(invalid)?;
-    let shelf = reg.shelf_root(key)?;
-    let vocabulary: BTreeSet<&str> = counts
-        .values()
-        .filter_map(Value::as_object)
-        .flat_map(|c| c.keys().map(String::as_str))
-        .collect();
-    let stems: BTreeMap<&String, &str> = words
-        .iter()
-        .filter_map(|w| stem(w, &vocabulary).map(|s| (w, s)))
-        .collect();
-    let mut df = BTreeMap::new();
-    let mut total = 0.0;
-    let mut candidates = Vec::new();
-    for (path, body) in docs {
-        let text = body.as_str().ok_or(invalid)?;
-        let counter = counts.get(path).and_then(Value::as_object).ok_or(invalid)?;
-        let length = lengths.get(path).and_then(Value::as_u64).ok_or(invalid)? as f64;
-        total += length;
-        let mut matches = Vec::new();
-        for word in words {
-            let found = match stems.get(word) {
-                Some(stem) => prefixed(counter, stem).ok_or(invalid)?,
-                None => match counter.get(word) {
-                    Some(freq) => Some(freq.as_u64().ok_or(invalid)?),
-                    None => None,
-                },
-            };
-            if let Some(freq) = found {
-                *df.entry(word).or_insert(0) += 1;
-                if freq > 0 {
-                    matches.push((word, freq as f64));
-                }
-            }
-        }
-        if !matches.is_empty() {
-            if let (Some(root), Some(name)) = (&shelf, path.strip_prefix("shelf:")) {
-                let changed = "shelf original changed or unavailable; rebuild index";
-                if crate::shelf::read(root, name).map_err(|_| changed)?.0 != text {
-                    return Err(changed.into());
-                }
-            }
-            candidates.push((path, text, length, matches));
-        }
-    }
-    let average = if total == 0.0 {
-        1.0
-    } else {
-        total / docs.len() as f64
-    };
-    let mut ranked = Vec::new();
-    for (path, text, len, hits) in candidates {
-        let mut score = 0.0;
-        for (word, n) in hits {
-            let df = f64::from(df[word]);
-            let idf = (1.0 + (docs.len() as f64 - df + 0.5) / (df + 0.5)).ln();
-            score += idf * n * 2.5 / (n + 1.5 * (0.25 + 0.75 * len / average));
-        }
-        ranked.push((score, path, text));
-    }
-    ranked.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(b.1)));
-    let hits: Vec<_> = ranked.into_iter().take(top).map(|(score,path,text)| {
-        let title = text.lines().find(|s| s.starts_with("# ")).map(|s| s.trim_start_matches(['#',' '])).unwrap_or(path);
-        json!({"path":path,"title":title,"score":(score*1e6).round_ties_even()/1e6,"excerpt":text.chars().take(500).collect::<String>()})
-    }).collect();
-    let mut result =
-        json!({"library":key,"engine":"lexical-bm25","indexed_at":indexed_at,"hits":hits});
-    if hits_empty(&result) {
-        let korean_query = words.iter().any(|w| w.chars().any(hangul));
-        let korean_documents = vocabulary.iter().any(|w| w.chars().any(hangul));
-        result["hint"] = json!(if korean_query && !korean_documents {
-            "The library's documents contain no Korean words, and search matches words, not meanings. Search again with words in the documents' language."
-        } else {
-            "No document contains these words. Search matches words, not meanings, so try the words the documents use, or fewer words."
-        });
-    }
-    Ok(result)
-}
-
-fn hits_empty(result: &Value) -> bool {
-    result["hits"].as_array().is_some_and(Vec::is_empty)
-}
-
-fn hangul(c: char) -> bool {
+pub(crate) fn hangul(c: char) -> bool {
     ('\u{AC00}'..='\u{D7A3}').contains(&c)
 }
 
 /// A word in the text often carries an ending: "반품하려면" and "반품은" for "반품", "returned" for "return". The search
 /// counts every indexed word that begins with the returned part. For a query word of two or more Hangul syllables it is
 /// the longest leading part of at least two syllables that begins some indexed word; for another word of four or more
-/// characters it is the word itself. Shorter words match only whole words.
-fn stem<'a>(word: &str, vocabulary: &BTreeSet<&'a str>) -> Option<&'a str> {
+/// characters it is the word itself. Shorter words match only whole words. `first_from` gives the first indexed word
+/// at or after a part, in sorted order.
+pub(crate) fn stem<'a>(word: &str, first_from: &dyn Fn(&str) -> Option<&'a str>) -> Option<&'a str> {
     let length = word.chars().count();
     let ends: Vec<usize> = if length >= 2 && word.chars().all(hangul) {
         word.char_indices()
@@ -566,23 +581,12 @@ fn stem<'a>(word: &str, vocabulary: &BTreeSet<&'a str>) -> Option<&'a str> {
     };
     ends.iter().rev().find_map(|&end| {
         let part = &word[..end];
-        let from = (std::ops::Bound::Included(part), std::ops::Bound::Unbounded);
-        let next: &'a str = *vocabulary.range::<str, _>(from).next()?;
+        let next = first_from(part)?;
         next.starts_with(part).then(|| &next[..end])
     })
 }
 
-/// The summed count of the document's words that begin with `stem`; `None` inside when it has none, and `None`
-/// outside when a count is not a number.
-fn prefixed(counter: &serde_json::Map<String, Value>, stem: &str) -> Option<Option<u64>> {
-    let mut sum = None;
-    for (_, freq) in counter.iter().filter(|(w, _)| w.starts_with(stem)) {
-        *sum.get_or_insert(0) += freq.as_u64()?;
-    }
-    Some(sum)
-}
-
-fn read(reg: &Registry, key: &str, path: &str, pages: Option<&str>) -> Result<Value> {
+pub(crate) fn read(reg: &Registry, key: &str, path: &str, pages: Option<&str>) -> Result<Value> {
     let root = reg.root(key)?;
     if let Some(name) = path.strip_prefix("shelf:") {
         let shelf = reg
@@ -742,12 +746,7 @@ pub fn run(cmd: &str, args: &[String]) -> Result<Option<i32>> {
             for other in reads.iter().filter_map(Value::as_str) {
                 let mut row = json!({"library":other,"name":reg.rows[other].get("name").unwrap_or(&json!(other))});
                 match search_one(&reg, other, pos[0], 3) {
-                    Ok(h) => {
-                        row["hits"] = h["hits"].clone();
-                        if let Some(why) = h.get("fallback") {
-                            row["fallback"] = why.clone();
-                        }
-                    }
+                    Ok(h) => row["hits"] = h["hits"].clone(),
                     Err(e) => row["error"] = json!(e),
                 }
                 near.push(row);
@@ -797,7 +796,8 @@ pub fn run(cmd: &str, args: &[String]) -> Result<Option<i32>> {
             _ => {}
         }
     }
-    let mut code = 0;
+    // Semantic search that was configured but failed still prints the word results, and says so.
+    let mut code = i32::from(output["semantic"]["status"] == "failed");
     if web {
         let (step, rc) = web_step(name, pos[0])?;
         output["web"] = step;

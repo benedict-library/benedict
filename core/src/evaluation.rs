@@ -177,11 +177,18 @@ pub fn run(config: &Path, key: Option<&str>, args: &[String]) -> Result<Option<(
     let mut hits = 0;
     let mut passed_keys = 0;
     let mut elapsed = 0.0;
+    // The search room reports the engine of each search; semantic search can fall back to words alone.
+    let mut engines = BTreeSet::new();
+    let mut semantic = Value::Null;
     for g in questions {
         let q = g["q"].as_str().ok_or("invalid question")?;
         let started = Instant::now();
         let wanted = targets(&g["answer_doc"], &corpus.paths)?;
         let found = corpus.search(q, 100)?;
+        engines.insert(found["engine"].as_str().unwrap_or("lexical-bm25").to_owned());
+        if semantic.is_null() || found["semantic"]["status"] != "ok" {
+            semantic = found["semantic"].clone();
+        }
         let paths: Vec<_> = found["hits"]
             .as_array()
             .ok_or("invalid search hits")?
@@ -199,7 +206,8 @@ pub fn run(config: &Path, key: Option<&str>, args: &[String]) -> Result<Option<(
         let secs = (started.elapsed().as_secs_f64() * 1_000_000.0).round() / 1_000_000.0;
         elapsed += secs;
         hits += usize::from(rank.is_some_and(|r| r <= k));
-        let mut row = json!({"ts":stamp,"q":q,"answer_doc":g["answer_doc"],"rank":rank,"secs":secs,"rc":0,"top":top});
+        let mut row = json!({"ts":stamp,"q":q,"answer_doc":g["answer_doc"],"rank":rank,"secs":secs,"rc":0,"top":top,
+            "engine":found["engine"]});
         for field in ["src", "made_by"] {
             if let Some(value) = g.get(field) {
                 row[field] = value.clone()
@@ -224,7 +232,12 @@ pub fn run(config: &Path, key: Option<&str>, args: &[String]) -> Result<Option<(
     if graded {
         summary["key_coverage_pass"] = json!(passed_keys);
     }
-    let report = json!({"library":corpus.key,"engine":"lexical-bm25","golden":golden.file_name().and_then(|s|s.to_str()),
+    let engine = match engines.len() {
+        0 => "lexical-bm25".to_owned(),
+        1 => engines.into_iter().next().unwrap_or_default(),
+        _ => "mixed".to_owned(),
+    };
+    let report = json!({"library":corpus.key,"engine":engine,"semantic":semantic,"golden":golden.file_name().and_then(|s|s.to_str()),
         "passed":passed,"rows":result,"summary":summary});
     if let Some(out) = out {
         let absolute = std::path::absolute(out).map_err(|e| e.to_string())?;

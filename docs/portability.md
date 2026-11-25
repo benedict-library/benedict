@@ -6,9 +6,33 @@ Docker starts the Rust `benedict` command. Activation creates the registry, wiki
 
 A library can opt into a shelf with its own `shelf_root`. Search indexes its Markdown and text originals. Use `read shelf:relative/path` to open the original and obtain its SHA-256 digest. Reindex after changing an original. Keep separate registries and volumes for libraries whose contents or names must remain private.
 
-When a library's prebuilt index is missing, damaged or made for other files, `benedict search` reads that
-library's documents directly, ranks them the same way and says why under `fallback` (`indexed_at` is then null).
-The Python compatibility client below still refuses such a search.
+The librarian (and `benedict index`) writes each library's index to the database: a catalog record per document
+(path, title, summary from its front matter title and description or its first line, and SHA-256 hash, without the
+text), word counts and lengths, with one version row per library. Only documents whose text changed are written
+again, in one transaction. The search room loads the index into memory when the room service starts and answers
+`benedict search` from it; there is no index file. When the librarian writes a new version, the room answers from
+the old one until the new one is loaded. Results list up to three catalog records under `catalog` apart from the
+ranked `hits`. Hits open their originals for the excerpt; a shelf original that changed since the index asks for a
+new index. Without the room service, or before a library's first index, search fails and says so; it never reads
+the files instead. The first librarian run after an upgrade compares five questions on the earlier JSON index file
+and on the database, removes the file when they agree and otherwise keeps it and lists the questions under
+`index_mismatch`.
+
+Semantic search (SQLite installations): with `LIBRARY_EMBED_URL` set (an `http://` server answering
+`POST /v1/embeddings`, such as the `embedder` service of the `semantic` compose profile) and `LIBRARY_EMBED_MODEL`
+naming its model, the librarian embeds each changed document after indexing, in 1,000-character parts, at most
+2,000 parts a cycle, and stores the vectors in the database (`benedict_vectors`, `benedict_vector_identity`). A new
+model name embeds every document again. A request has no fixed time limit: it may take twice the slowest recorded time
+per part times its parts (eight times wider while a library has fewer than five records; the first prediction is
+0.5 s per part). Each request's time per part is recorded in `benedict_embed_pace` (the last 50); a request cut by
+its wait is recorded at that wait, as a lower bound, and sent once more with the longer wait, and the step reports
+`cut`; connecting may take the same wait, and a connection that times out counts as cut. A slow machine is therefore waited on as long as it needs, and a server that never answers is left to the next
+cycle. The search room loads the vectors with the index and fuses the word ranking
+with the vector ranking (best part per document, reciprocal rank fusion with k = 60 over the top 50 of each). Results
+carry `engine` (`lexical-bm25` or `hybrid-rrf`) and `semantic.status`: `not_configured` without a server,
+`partial` while documents still wait for vectors, and `failed` with the reason when the server does not answer; then
+the word results are still printed and the exit status is 1. A failed embedding step makes the librarian cycle a
+warning; it does not stop the cycle. PostgreSQL installations keep the Python vector mode below.
 
 ## Python compatibility and local file/index mode
 

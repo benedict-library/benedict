@@ -22,7 +22,7 @@ Benedict takes its name from Benedict of Nursia. His Rule set aside time for rea
 
 ![Library structure. Four rooms use shelf originals and record work in memory and a database. The librarian curates the wiki. The courier carries external tasks and returns their results.](docs/architecture.en.svg)
 
-Shelf originals are mounted read-only. Each room writes its conversation to a dated transcript on the shelf and keeps it in memory; agents save finished work to the database. The librarian files curated knowledge in the wiki. In any of the four rooms, an agent can **dispatch external work** (`room dispatch`). Once the host runs the assigned work through the courier, the next session can **read the reply** (`room responses`) using the request ID in the same library. [Courier guide](docs/courier.md)
+Shelf originals are mounted read-only. Each room writes its conversation to a dated transcript on the shelf and keeps it in memory; agents save finished work to the database. The librarian writes each document's catalog record and word counts to the database, and the search room keeps them in memory to answer searches; there is no index file. The librarian files curated knowledge in the wiki. In any of the four rooms, an agent can **dispatch external work** (`room dispatch`). Once the host runs the assigned work through the courier, the next session can **read the reply** (`room responses`) using the request ID in the same library. [Courier guide](docs/courier.md)
 
 ## How agents work here
 
@@ -51,7 +51,7 @@ Keep this folder after installing: your project opens its library with the setti
 bin/install-project --start example ~/projects/notes
 ```
 
-Replace `~/projects/notes` with your project folder (create it first if it does not exist). The example brings its own example shelf. To start from your own wiki, use `--wiki WIKI_FOLDER` instead of `--start example`. The installer sets the memory limit from the wiki size, uses SQLite without a shelf, starts the librarian and brings the library back after a host restart. Its summary shows each choice and the option that changes it (`--memory`, `--database`, `--shelf`, `--autostart`, `--librarian`). It asks a question only if the library cannot write your wiki.
+Replace `~/projects/notes` with your project folder (create it first if it does not exist). The example brings its own example shelf. To start from your own wiki, use `--wiki WIKI_FOLDER` instead of `--start example`. The installer sets the memory limit from the wiki size, uses SQLite without a shelf, starts the librarian and brings the library back after a host restart. When Docker has memory for it, the installer also starts a local embedding server, so search finds pages that use other words for the same thing; nothing leaves the machine. Semantic search can be turned off, or moved to a faster embedding server on the host (a GPU, or a Mac where Docker runs in a VM): see [Choosing how Benedict embeds](docs/embedding.md). Its summary shows each choice and the option that changes it (`--memory`, `--database`, `--shelf`, `--autostart`, `--librarian`, `--semantic`). It asks a question only if the library cannot write your wiki.
 
 **3. Check the connection.**
 

@@ -44,7 +44,7 @@ pub fn prompt(step: &str, wiki_found: bool) -> Result<Value, String> {
             "컨테이너 하나가 쓸 메모리 상한을 어떻게 정할까요?",
             vec![choice(
                 "default",
-                "512MiB로 시작하기",
+                "1GiB로 시작하기",
                 "현재 기본값입니다. 사용량을 확인한 뒤 조정할 수 있습니다.",
             )],
         ),

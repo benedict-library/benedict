@@ -15,6 +15,8 @@ distributed under their respective licenses, not this repository's MIT license.
 | axum 0.8.9 and tokio 1.54.1 | MIT | Plaza HTTP server, async runtime and network transport. |
 | reqwest 0.13.5, serde 1.0.229 and serde_json 1.0.154 | MIT OR Apache-2.0 | Plaza HTTPS client, JSON API and event storage. |
 | Git | GPL-2.0 | Used for skill provenance and wiki backups; installed from Debian in the Docker image. |
+| llama.cpp server image (`ghcr.io/ggml-org/llama.cpp:server-b12464`, pinned by digest) | MIT | Optional `embedder` service of the `semantic` compose profile; serves `/v1/embeddings`. Not part of the library image. |
+| EmbeddingGemma 2 GGUF (`ggml-org/embeddinggemma-2-GGUF`, BF16, pinned revision and SHA-256) | Apache-2.0 (model card) | Embedding model the installer downloads into the `library_models` volume when semantic search is on. Not redistributed by this repository. |
 
 Plaza pins its dependency tree in [plaza/Cargo.lock](plaza/Cargo.lock). Its container uses the Rust toolchain and Alpine Linux, whose packaged components carry their respective licenses.
 

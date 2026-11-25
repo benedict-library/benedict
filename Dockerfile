@@ -35,7 +35,8 @@ COPY docs /app/docs
 COPY runtime /app/runtime
 COPY rooms /app/rooms
 COPY examples /app/examples
-RUN mkdir /data && chown 10001:10001 /data
+# COPY keeps the checkout's file modes; a checkout made with a private umask must still be readable.
+RUN chmod -R a+rX /app && mkdir /data && chown 10001:10001 /data
 USER 10001:10001
 ENTRYPOINT ["benedict"]
 CMD ["--help"]

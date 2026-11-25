@@ -38,7 +38,12 @@ async def serve(path, host, port):
 
     if os.path.exists(path):
         os.unlink(path)
-    server = await asyncio.start_unix_server(handle, path)
+    # Create the socket with its final mode: a chmod after bind leaves a moment when it is wider.
+    mask = os.umask(0o117)
+    try:
+        server = await asyncio.start_unix_server(handle, path)
+    finally:
+        os.umask(mask)
     os.chmod(path, 0o660)
     return server
 

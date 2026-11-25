@@ -1,5 +1,6 @@
-// A mounted wiki may have been indexed by an earlier Python installation. Both readers
-// must rank the same documents, before and after the agent rebuilds the index in Rust.
+// A mounted wiki may have been indexed by an earlier Python installation. Search reads the
+// index the Rust librarian writes to the database; both clients must rank the same documents.
+mod common;
 use serde_json::Value;
 use std::{fs, path::Path, process::Command};
 
@@ -21,6 +22,7 @@ fn existing_index_and_new_index_can_be_read_by_both_clients() {
             .current_dir(data)
             // The compatibility client searches through this build of the Rust CLI.
             .env("BENEDICT_BIN", env!("CARGO_BIN_EXE_benedict"))
+            .env("LIBRARY_ROOM_SOCKET", common::socket(data))
             .env_remove("LIBRARY_DB_URL")
             .env_remove("LIBRARY_DB")
             .env_remove("LIBRARY_ROOM_HOME")
@@ -34,6 +36,17 @@ fn existing_index_and_new_index_can_be_read_by_both_clients() {
         serde_json::from_slice::<Value>(&out.stdout).unwrap()
     };
     run(false, &["init", "--demo"]);
+    let _room = common::Room::start(|| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_benedict"));
+        command
+            .current_dir(data)
+            .env("LIBRARY_ROOM_SOCKET", common::socket(data))
+            .env_remove("LIBRARY_DB_URL")
+            .env_remove("LIBRARY_DB")
+            .env_remove("LIBRARY_ROOM_HOME")
+            .env_remove("LIBRARY_CONFIG");
+        command
+    });
     fs::write(
         data.join("wiki/entities/unicode.md"),
         "# Straße\r\n한글 도서관\r\nΟΣ _ß İﬃ",
@@ -41,9 +54,11 @@ fn existing_index_and_new_index_can_be_read_by_both_clients() {
     .unwrap();
     run(false, &["add", "--key", "river"]);
     fs::write(data.join("wiki-river/decision.md"), "# 조사\n한글 Straße").unwrap();
+    // An earlier Python index stays beside the registry; the Rust index is the one searched.
     for native_index in [false, true] {
         for key in ["main", "river"] {
             run(native_index, &["index", "--library", key]);
+            run(true, &["index", "--library", key]);
         }
         for query in ["REFUND", "STRASSE 한글", "οσ", "_ss", "İﬃ", "no such token"] {
             let args = ["search", "--top", "2", query];
@@ -72,6 +87,7 @@ fn previous_clients_approval_covers_exactly_the_same_wiki_and_skill() {
             .args(args)
             .current_dir(base)
             .env("BENEDICT_APP", repo)
+            .env("LIBRARY_ROOM_SOCKET", common::socket(base))
             .env_remove("LIBRARY_CONFIG")
             .env_remove("LIBRARY_DB")
             .env_remove("LIBRARY_DB_URL")
@@ -87,6 +103,18 @@ fn previous_clients_approval_covers_exactly_the_same_wiki_and_skill() {
         serde_json::from_slice::<Value>(if ok { &ret.stdout } else { &ret.stderr }).unwrap()
     };
     run(false, &["init"], true);
+    let _room = common::Room::start(|| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_benedict"));
+        command
+            .current_dir(base)
+            .env("BENEDICT_APP", repo)
+            .env("LIBRARY_ROOM_SOCKET", common::socket(base))
+            .env_remove("LIBRARY_CONFIG")
+            .env_remove("LIBRARY_DB")
+            .env_remove("LIBRARY_DB_URL")
+            .env_remove("LIBRARY_ROOM_HOME");
+        command
+    });
     fs::write(base.join("원문.md"), "original").unwrap();
     let skill = base.join("기존 스킬");
     fs::create_dir(&skill).unwrap();

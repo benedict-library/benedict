@@ -5,12 +5,44 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The two Docker checks (installation handoff and Plaza on a fresh volume) run as their own jobs beside the test
+  matrix instead of after the Rust steps on Linux. Measured twice each: a run took 2m50s and 3m24s instead of 6m04s and
+  6m56s. Caching Rust builds as well did not shorten it further (3m12s, 4m23s) and is not added.
+- An embedding request from the librarian no longer has a fixed 60-second limit, which cut every batch on a slow
+  machine (16 parts took over 60 s on a shared four-core virtual machine) so documents never got vectors. The wait is
+  now predicted from the library's own records (`benedict_embed_pace`): twice the slowest recorded time per part,
+  wider while there are few records. A cut request is recorded as a lower bound and sent once more with the longer
+  wait; the vector step reports `cut`.
+- A batch embedding request may also take its predicted wait to connect, instead of two seconds, and a connection
+  that times out counts as cut and is sent once more. A virtual machine's network stalled a connection for over two
+  seconds after a few hundred requests in a row while the server was healthy, which ended the step each time.
+
 ### Added
 
 - `benedict gate --listen HOST:PORT` lets agents in other containers search and read a library without
   Docker access: one JSON line per connection, `search` and `read` with `--top`, `--pages`, `--question` and
   `--library` only, masked and recorded as on the command line. The `gate` compose service is off unless
   started with `--profile gate`; `bin/library-client` is a standard-library client. See `docs/gate.md`.
+- `docs/embedding.md` (and `docs/embedding.ko.md`) explains what semantic search adds and costs, the four choices
+  (off, the embedder container, a server on the host, a server elsewhere), measured speed of the container against a
+  host server on a Mac, how containers reach the host for each Docker, and `launchd` and `systemd` examples. The
+  installer summary names `--embed-url`, and on macOS with the embedder container it points to that page.
+- `install-project` records the image that indexed a project in `.benedict/indexed-image`. A later run with the
+  same image (for example `--semantic on|off` or `--embed-url`) keeps the index instead of indexing the whole wiki
+  again; a new image indexes again as before.
+- `setup` and `install-project` accept `--embed-url http://HOST:PORT` (and `--embed-model NAME`) to use an
+  embedding server that already runs instead of starting the `embedder` service. `install-project --image IMAGE`
+  uses an image built on another machine and loaded with `docker load`, so a small server does not compile.
+- Semantic search for SQLite installations. The librarian embeds changed documents through a local embedding
+  server (`LIBRARY_EMBED_URL`, `LIBRARY_EMBED_MODEL`) and stores the vectors in the database; the search room fuses
+  word and vector rankings with reciprocal rank fusion. Results carry `engine` and `semantic.status`; a server
+  that does not answer leaves the word results and exit status 1. Golden-set evaluation records the engine that
+  answered. The `semantic` compose profile adds an `embedder` service (llama.cpp server, pinned by digest) and the
+  `library_models` volume. `install-project` turns it on when the library and the 2 GiB embedding server fit in two
+  thirds of Docker's memory, downloads EmbeddingGemma 2 at a pinned revision and checks its SHA-256, and shows the
+  choice in its summary; `--semantic on|off` sets it at installation or later.
 - `read` and `search` mask personal data before a result is recorded or printed, on the native path and
   through the compatibility adapter. Korean resident and foreign registration numbers keep the birth date
   and one digit (`900101-1******`), mobile numbers keep the first and last groups (`010-****-5678`),
@@ -40,6 +72,22 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reads `golden/LIBRARY.jsonl` by default. A missing golden file is `not_configured`; a bad line is `invalid` with
   its line number. Neither stops the cycle.
 
+- The search room. The librarian and `benedict index` write each library's index to the database: a catalog
+  record per document (title, summary and hash, without the text), word counts and lengths, and one version row
+  (`benedict_catalog`, `benedict_terms`, `benedict_lengths`, `benedict_index_state`; the same tables in SQLite and
+  PostgreSQL). Only changed documents are written again, in one transaction. The room service loads the index into
+  memory and answers `benedict search`, with the same ranking as before; while a new version loads it answers from
+  the old one. Results add up to three catalog records under `catalog`; `hits` are unchanged. The librarian's
+  index step reports the catalog count, distinct words and seconds. Measured on a wiki of 42,000 files
+  (31,162 documents): the first index took 71 seconds within 1 GiB (peak 0.82 GB with the page cache), an index
+  with nothing changed 13 seconds, the room loaded the index in about 12 seconds and held 0.2 GB, and a search
+  answered in about 0.1 second, where reading the JSON index took 8 to 9 seconds.
+- The default memory limit is 1 GiB per container (was 512 MiB); `--memory` changes it.
+- The first librarian run after an upgrade compares five questions on the earlier JSON index file and the
+  database, over the pages both hold the same: pages added, removed or changed since the file was written (such
+  as the bundled skill page an upgrade replaces) are left out of both and counted in `changed_since_json`. It
+  removes the file when they agree; otherwise the file stays and `index_mismatch` lists the questions.
+
 - Setup asks whether the library starts again when the host restarts (`--autostart on|off`). `on`, the
   recommended answer and the example start's default, gives the room and librarian containers
   `restart: unless-stopped`; `off` sets `restart: "no"` for a trial library. `compose.yaml` uses
@@ -52,14 +100,18 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `save` keeps one database record (`kind: record`) and no longer writes a wiki page. `file --id` writes the filing,
   adds one golden line per question with wiki sources (another wiki source for the same question extends that line)
   and sets `filed_at`. Running it again fills only what is missing.
-- The compose librarian no longer passes the example golden file; only the example start points
-  `LIBRARY_GOLDEN` at it.
+- The compose librarian no longer uses the example golden file. The example start copies it to
+  `golden/main.jsonl` when that file does not exist yet; other libraries grow their own from filed answers.
+- Search goes through the search room. Without the room service it fails with `search room not running`, and a
+  library without an index fails with `run index or librarian`; search no longer reads a JSON index file or the
+  wiki files. Without `LIBRARY_DB` the SQLite database sits beside `library.json`. The Python compatibility
+  commands use the Rust search only when `LIBRARY_ROOM_SOCKET` is set and otherwise search their own index.
 - An upgrade replaces the bundled skill page (`entities/skill_benedict-library.md`) when it is the page an
   earlier version wrote. An edited page stops the installer with a message that says how to keep it.
 - `install-project` asks only where the library starts. For your own wiki it uses SQLite without a
   shelf, starts the librarian, turns autostart on and sets the memory limit from the wiki size with
-  `setup --recommend-memory` (measured: about 20,000 pages fit in 2 GiB, about 40,000 in 3 GiB; at most
-  two thirds of Docker's memory). If initial indexing still runs out of memory, the installer doubles the
+  `setup --recommend-memory` (1 GiB per container up to about 50,000 pages, 1 GiB more for each further
+  50,000; at most two thirds of Docker's memory). If initial indexing still runs out of memory, the installer doubles the
   limit and tries again. A summary shows every choice and the option that changes it.
 - `install-project` checks that the library (UID 10001) can write the wiki. In a terminal it asks once
   before granting that UID access with `setfacl`; otherwise it stops with the exact command.
@@ -74,8 +126,7 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   container to start. To upgrade an installed project, delete its `.benedict/library` and run
   `bin/install-project` again with the same workspace.
 - Search is one command, `benedict search`. Without `--library` it also returns, under `near`, the top hits of
-  each library the central library `reads`. A library whose prebuilt index is missing, damaged or made for other
-  files is searched in its wiki files directly, and `fallback` says why. `--web` runs the deployment's
+  each library the central library `reads`, or that library's error. `--web` runs the deployment's
   `LIBRARY_WEB_CMD` with the library key and search terms after the inside results and puts its output under
   `web`; without it nothing leaves the library. The Python `bin/search.py` and its room code
   `rooms/room_query.py` are removed, and room-side search (side sections, box libraries, vector hits) is not
@@ -83,6 +134,28 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A first index stopped by the container's memory limit no longer fails with an empty reason. Setup now reports
+  `initial wiki indexing failed: indexer killed (signal 9), most likely by the memory limit; raise it with --memory
+  SIZE`, and an indexer that stops without printing anything names its exit status. (#2)
+- `docs/docker-setup.md` explains how the installer sizes the memory limit from the wiki and raises it after an
+  out-of-memory first index, and describes the scheduled `librarian` service the installer starts, `--librarian off`
+  and how to check it. It no longer gives the earlier 512 MiB starting limit. (#2, #3)
+- The SQLite database uses WAL mode, so long reads no longer block writes. On 31,164 pages, counting the index's
+  words takes 11 seconds and loading the index into the room takes 8. Under the earlier rollback journal, a search
+  recorded during either read waited ten seconds and failed with `database is locked`. An existing database switches
+  when it is opened for writing and no other connection is reading it; until then it keeps its earlier mode, so an
+  upgrade does not fail while the room loads the index.
+- Indexing reads every page before it opens the write transaction and then writes only the changed pages
+  (up to 2,000; a larger change is written while it is read, as on a first index). Before, the transaction
+  stayed open for the whole read, so with SQLite a search recorded during the librarian's cycle waited
+  ten seconds and failed with `database is locked` (measured on 31,164 pages: a 13-second read).
+- Upgrading a library installed from your own wiki no longer points its librarian at the bundled example golden
+  questions: `compose.yaml` no longer sets `LIBRARY_GOLDEN`, so the librarian reads `golden/LIBRARY.jsonl` and
+  reports `not_configured` without one.
+- The image makes everything under `/app` readable. A checkout with private file modes (for example cloned with
+  umask 007) produced an image whose bundled files the library account could not read.
+- `bin/gate.py` creates each socket with mode 0660 instead of narrowing it after it is created, so a
+  client can no longer connect while the socket is still open to everyone.
 - `read shelf:<path>` no longer refuses an original that is not plain text. A PDF, office document
   or image on the shelf is now described by its size and SHA-256 with `"binary": true`, so an agent
   can open the file itself instead of being told the original is unreadable.

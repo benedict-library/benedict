@@ -20,7 +20,8 @@ import sys
 # Registry fields the Rust CLI handles; a registry with any other field keeps the policy-aware Python path.
 SIMPLE_FIELDS = {"wiki_root", "shelf_root", "central", "name", "status", "reads", "dirs"}
 # Rust search records the query when these are set; this compatibility search never recorded.
-RECORDING_ENV = ("LIBRARY_DB", "LIBRARY_DB_URL", "LIBRARY_DB_URL_FILE", "LIBRARY_PROJECT", "LIBRARY_ROOM_SOCKET")
+# The room socket and project stay: Rust search asks the search room.
+RECORDING_ENV = ("LIBRARY_DB", "LIBRARY_DB_URL", "LIBRARY_DB_URL_FILE")
 
 
 def rust_cli():
@@ -483,7 +484,8 @@ class Library:
         if not words:
             raise ValueError("query must contain a word")
         key, _, root = self.selected(key)
-        rust = rust_cli()
+        # Rust search answers from the search room, so it is used only where a room is configured.
+        rust = rust_cli() if os.environ.get("LIBRARY_ROOM_SOCKET") else None
         if rust and all(set(row) <= SIMPLE_FIELDS for row in self.registry["libraries"].values()):
             return self.rust_search(rust, query, key, top)
         path = self.index_path(key)
