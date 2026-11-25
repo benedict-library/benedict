@@ -754,6 +754,13 @@ pub fn run(cmd: &str, args: &[String]) -> Result<Option<i32>> {
             output["near"] = Value::Array(near);
         }
     }
+    if cmd == "search" && crate::records::enabled() {
+        // Earlier saved answers sit beside the ranked hits and never take a place from them.
+        match crate::records::asked(name, question, pos[0], 3) {
+            Ok(rows) => output["asked"] = Value::Array(rows),
+            Err(e) => output["asked_error"] = json!(e),
+        }
+    }
     if cmd != "index" {
         // Mask before the result is recorded or printed, so neither keeps the values.
         crate::redact::value(&mut output);

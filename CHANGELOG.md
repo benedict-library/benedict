@@ -7,6 +7,14 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `search` lists earlier saved answers under `asked` when records are kept: up to three `save` records from the same
+  library, the same question first (`same: true`, ignoring spacing and letter case), then answers sharing at least two
+  words with the question or search words. They sit beside the ranked `hits` instead of among them. In a random test of
+  100 questions against a wiki of about 22,000 pages where answers had been written as wiki pages, those pages took 6.8
+  of the first ten places; the original source was in the first ten for 43 questions with them and 56 with the originals
+  ranked alone and earlier answers shown beside them, while the share reaching the source through either stayed the
+  same (72 and 71).
+
 - The shelf can be network storage. `setup` and `install-project` accept `--shelf-volume NAME` (a Docker volume the user
   created, for example an SMB or NFS share through the local driver) and `--shelf-subpath DIR` for one folder inside it;
   the profile mounts it read-only as an external volume. A host share mounted on macOS or Windows may not reach Docker's
