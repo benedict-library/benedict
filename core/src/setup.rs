@@ -891,9 +891,9 @@ mod tests {
         assert!(overlay(&postgres).is_err());
         // An embedding server that already runs elsewhere: its address, no embedder service.
         let mut external = own.to_vec();
-        external.extend(["--embed-url", "http://172.17.0.1:11441", "--embed-model", "eg2"]);
+        external.extend(["--embed-url", "http://embeddings.example:8080", "--embed-model", "eg2"]);
         let (_, v) = overlay(&base(&external)).unwrap();
-        assert_eq!(v["services"]["room"]["environment"]["LIBRARY_EMBED_URL"], "http://172.17.0.1:11441");
+        assert_eq!(v["services"]["room"]["environment"]["LIBRARY_EMBED_URL"], "http://embeddings.example:8080");
         assert_eq!(v["services"]["librarian"]["environment"]["LIBRARY_EMBED_MODEL"], "eg2");
         assert!(v["services"].get("embedder").is_none());
         for wrong in [
