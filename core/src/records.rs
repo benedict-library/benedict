@@ -5,7 +5,7 @@
 use rusqlite::{Connection, OpenFlags, params};
 use serde_json::{Value, json};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     env,
     io::Write,
     path::PathBuf,
@@ -532,6 +532,76 @@ pub(crate) fn recall(library: &str, field: &str, lookup: &str) -> Result<Value, 
             .ok_or_else(|| "record not found".into());
     }
     Ok(json!({"records":records}))
+}
+
+/// Same question regardless of spacing and letter case.
+fn same_text(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+/// Saved answers (`save` records with an answer) beside a search: the same question first, then
+/// answers whose question or search words share at least two words with this one (all of them when it
+/// has fewer). They are listed apart from the ranked hits, so earlier answers never take a place from
+/// the documents; the librarian files the ones worth keeping.
+pub(crate) fn asked(library: &str, question: &str, query: &str, limit: usize) -> Result<Vec<Value>, String> {
+    const ANSWER_CHARS: usize = 300;
+    let text = if question.trim().is_empty() { query } else { question };
+    let key = same_text(text);
+    let mine: BTreeSet<String> = crate::local::words(text).chain(crate::local::words(query)).collect();
+    if key.is_empty() || limit == 0 {
+        return Ok(Vec::new());
+    }
+    let project = project()?;
+    let params = scope(library, &project)?;
+    // First only the questions, so a long record history stays cheap; then the chosen rows in full.
+    let filter = "kind='record' AND answer<>''";
+    let heads: Vec<(i64, String, String)> = match backend()? {
+        Database::Sqlite(ref path) => {
+            if !path.exists() {
+                return Ok(Vec::new());
+            }
+            let db = sqlite(path, true)?;
+            let mut stmt = db
+                .prepare(&format!(
+                    "SELECT id, question, query FROM benedict_room_records
+                WHERE project=?1 AND library=?2 AND {filter} ORDER BY id DESC"
+                ))
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map(params![project, library], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .map_err(|e| e.to_string())?;
+            rows.collect::<Result<_, _>>().map_err(|e| e.to_string())?
+        }
+        Database::Postgres(ref url) => {
+            let sql = format!("{}\nSELECT json_build_array(id, question, query) FROM benedict_room_records
+                WHERE project=:'project' AND library=:'library' AND {filter} ORDER BY id DESC;", postgres_schema());
+            postgres(url, &sql, &params)?
+                .lines()
+                .map(|line| serde_json::from_str::<(i64, String, String)>(line).map_err(|e| e.to_string()))
+                .collect::<Result<_, _>>()?
+        }
+    };
+    let need = mine.len().min(2);
+    let mut found: Vec<(bool, usize, i64)> = Vec::new();
+    for (id, their_question, their_query) in heads {
+        let same = !their_question.trim().is_empty() && same_text(&their_question) == key;
+        let theirs: BTreeSet<String> =
+            crate::local::words(&their_question).chain(crate::local::words(&their_query)).collect();
+        let shared = mine.intersection(&theirs).count();
+        if same || (need > 0 && shared >= need) {
+            found.push((same, shared, id));
+        }
+    }
+    // Newest first within the same standing: rows arrive newest first and the sort is stable.
+    found.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
+    let mut out = Vec::new();
+    for (same, _, id) in found.into_iter().take(limit) {
+        let row = recall(library, "id", &id.to_string())?;
+        let answer: String = row["answer"].as_str().unwrap_or("").chars().take(ANSWER_CHARS).collect();
+        out.push(json!({"id":row["id"],"question":row["question"],"answer":answer,"source":row["source"],
+            "at":row["at"],"filed":row["filed_at"].as_str().is_some_and(|s| !s.is_empty()),"same":same}));
+    }
+    Ok(out)
 }
 
 fn row_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {

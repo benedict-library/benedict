@@ -13,6 +13,7 @@ Run the following commands through the installation's library entry point.
 1. Search for earlier decisions, relevant skills and originals with
    `benedict search --question "original task" "search terms"`.
    Open relevant hits with `benedict read "relative/path.md"`. For a shelf hit, keep its `shelf:` prefix. Record the source identifier and hash when the revision matters.
+   When records are kept, `asked` lists up to three earlier saved answers beside the hits: with `same: true` the same question was answered before, so read that answer and its sources first; the others share words with yours.
    For a new session, follow the sources in the handoff and check what still applies.
 2. Work alone in the reading room. For a joint decision use `benedict room task`
    with the question and source. Give collaborators in this library the task ID.
